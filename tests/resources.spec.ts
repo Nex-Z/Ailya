@@ -1,0 +1,61 @@
+import {test,expect} from '@playwright/test'
+test('extensions and scheduled tasks manual and chat workflows',async({page})=>{
+ const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:5173');
+ await page.getByRole('button',{name:'扩展',exact:true}).click();
+ await page.getByRole('button',{name:'新增 MCP',exact:true}).click();
+ await page.getByLabel('名称',{exact:true}).fill('Local MCP');
+ await page.getByLabel('启动命令',{exact:true}).fill('node server.js');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await page.getByRole('button',{name:'启用 Local MCP'}).click();
+ await expect(page.getByRole('button',{name:'停用 Local MCP'})).toBeVisible();
+ await page.getByRole('button',{name:'编辑 Local MCP'}).click();
+ await expect(page.getByLabel('启动命令',{exact:true})).toHaveValue('node server.js');
+ await page.getByRole('button',{name:'取消',exact:true}).click();
+ await page.getByRole('tab',{name:'Skills',exact:true}).click();
+ await page.getByRole('button',{name:'新增 Skill',exact:true}).click();
+ await page.getByLabel('名称',{exact:true}).fill('Review');
+ await page.getByLabel('Skill 内容',{exact:true}).fill('检查边界条件');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Review',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'定时任务',exact:true}).click();
+ await page.getByRole('button',{name:'新增 定时任务',exact:true}).click();
+ await page.getByLabel('名称',{exact:true}).fill('日报');
+ await page.getByLabel('任务内容',{exact:true}).fill('整理项目日报');
+ await page.getByRole('combobox',{name:'小时',exact:true}).click();
+ await page.getByRole('option',{name:'18',exact:true}).click();
+ await page.getByRole('combobox',{name:'分钟',exact:true}).click();
+ await page.getByRole('option',{name:'30',exact:true}).click();
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await page.getByRole('button',{name:'启用 日报',exact:true}).click();
+ await page.getByRole('button',{name:'新会话',exact:true}).first().click();
+ await page.getByRole('textbox',{name:'消息',exact:true}).fill('每天9点提醒我检查项目');
+ await page.getByRole('button',{name:'发送消息',exact:true}).click();
+ await expect(page.getByRole('dialog')).toBeVisible();
+ await expect(page.getByRole('combobox',{name:'小时',exact:true})).toHaveText('09');
+ await expect(page.getByRole('combobox',{name:'分钟',exact:true})).toHaveText('00');
+ await page.getByLabel('名称',{exact:true}).fill('早间检查');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await expect(page.getByText('已保存定时任务「早间检查」。',{exact:true})).toBeVisible();
+ await page.reload();
+ await page.getByRole('button',{name:'定时任务',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'早间检查',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'停用 日报',exact:true})).toBeVisible();
+ await page.screenshot({path:'artifacts/tasks-menu.png',animations:'disabled'});
+ await page.getByRole('button',{name:'编辑 早间检查',exact:true}).click();
+ await page.getByRole('combobox',{name:'小时',exact:true}).click();
+ await page.getByRole('option',{name:'10',exact:true}).click();
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await page.getByRole('button',{name:'删除 早间检查',exact:true}).click();
+ await page.getByRole('alertdialog').getByRole('button',{name:'删除',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'早间检查',exact:true})).toHaveCount(0);
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'收起侧栏'}).click();
+ await page.getByRole('button',{name:'新增 定时任务',exact:true}).click();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:'artifacts/task-dialog-mobile.png',animations:'disabled'});
+ expect(errors).toEqual([]);
+});
+
+
+

@@ -1,0 +1,58 @@
+import { test, expect } from '@playwright/test'
+test('catalog CRUD, dialogs, group references and persistence', async ({page}) => {
+ await page.goto('http://127.0.0.1:5173');
+ await page.getByRole('button',{name:'Agent',exact:true}).click();
+ await page.getByRole('button',{name:'新增 Agent',exact:true}).click();
+ await page.getByLabel('名称',{exact:true}).fill('Writer');
+ await page.getByLabel('Prompt',{exact:true}).fill('整理文档');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await expect(page.getByRole('button',{name:'查看 Writer'})).toBeVisible();
+ await page.getByRole('button',{name:'编辑 Writer'}).click();
+ await page.getByLabel('名称',{exact:true}).fill('Writer Pro');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await page.getByRole('button',{name:'查看 Writer Pro'}).click();
+ await expect(page.getByRole('dialog')).toBeVisible();
+ await expect(page.getByText('整理文档',{exact:true})).toBeVisible();
+ await page.getByRole('dialog').getByRole('button',{name:'新建会话',exact:true}).click();
+ await expect(page.getByRole('combobox',{name:'伙伴与团队'})).toHaveText('Writer Pro');
+ await page.getByRole('button',{name:'Group',exact:true}).click();
+ await page.getByRole('button',{name:'新增 Group',exact:true}).click();
+ await page.getByLabel('名称',{exact:true}).fill('Writing Team');
+ await page.getByRole('combobox',{name:'协调者'}).click();
+ await page.getByRole('option',{name:'Ailya',exact:true}).click();
+ await page.getByRole('button',{name:'Writer Pro',exact:true}).click();
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await page.getByRole('button',{name:'查看 Writing Team'}).click();
+ await expect(page.getByRole('dialog').getByText('Writer Pro',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'关闭',exact:true}).click();
+ await page.reload();
+ await page.getByRole('button',{name:'Group',exact:true}).click();
+ await expect(page.getByRole('button',{name:'查看 Writing Team'})).toBeVisible();
+ await page.screenshot({path:'artifacts/groups-grid.png',animations:'disabled'});
+ await page.getByRole('button',{name:'Agent',exact:true}).click();
+ await page.getByRole('button',{name:'删除 Writer Pro'}).click();
+ await page.getByRole('alertdialog').getByRole('button',{name:'删除',exact:true}).click();
+ await expect(page.getByRole('alert')).toContainText('正被 Group 使用');
+ await page.getByRole('button',{name:'取消',exact:true}).click();
+ await page.screenshot({path:'artifacts/agents-grid.png',animations:'disabled'});
+ await page.getByRole('button',{name:'Group',exact:true}).click();
+ await page.getByRole('button',{name:'编辑 Writing Team'}).click();
+ await page.getByLabel('名称',{exact:true}).fill('Docs Team');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await page.getByRole('button',{name:'删除 Docs Team'}).click();
+ await page.getByRole('alertdialog').getByRole('button',{name:'删除',exact:true}).click();
+ await expect(page.getByRole('button',{name:'查看 Docs Team'})).toHaveCount(0);
+ await page.getByRole('button',{name:'Agent',exact:true}).click();
+ await page.getByRole('button',{name:'删除 Writer Pro'}).click();
+ await page.getByRole('alertdialog').getByRole('button',{name:'删除',exact:true}).click();
+ await expect(page.getByRole('button',{name:'查看 Writer Pro'})).toHaveCount(0);
+ await page.getByRole('button',{name:'新增 Agent',exact:true}).click();
+ await page.getByLabel('名称',{exact:true}).fill('Ailya');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await expect(page.getByRole('alert')).toHaveText('名称已存在。');
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:'artifacts/agent-dialog-mobile.png',animations:'disabled'});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+

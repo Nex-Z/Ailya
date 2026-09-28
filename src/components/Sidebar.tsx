@@ -1,0 +1,28 @@
+import { useState } from 'react'
+import { Plus, Search, PanelLeftClose, Trash2, X, Bot, Users, Plug, Clock } from 'lucide-react'
+import { useStore } from '../store'
+import { Settings } from './Settings'
+import { Button } from './ui/button'
+import { Input } from './ui/input'
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from './ui/alert-dialog'
+import { cn } from '../lib/utils'
+export function Mark({ small = false }: { small?: boolean }) { return <span className={cn('relative inline-block font-serif italic leading-none text-neutral-600', small ? 'w-6 text-3xl' : 'text-8xl')} aria-hidden="true">a<span className={cn('absolute not-italic',small ? '-top-1 right-0 text-xs' : '-right-4 top-0 text-3xl')}>✳</span></span> }
+export function Sidebar({ open, close, view, navigate }: { open: boolean; close: () => void; view: string; navigate: (view: 'chat' | 'agents' | 'groups' | 'extensions' | 'tasks') => void }) {
+ const { sessions, activeId, select, newSession, remove } = useStore()
+ const [search,setSearch]=useState(''); const [searching,setSearching]=useState(false); const [deleting,setDeleting]=useState<string|null>(null)
+ const matches = sessions.filter(s => (s.title + s.messages.map(m=>m.text).join('')).toLowerCase().includes(search.toLowerCase()))
+ return <>{open && <button className="fixed inset-0 z-30 bg-black/20 md:hidden" aria-label="关闭侧栏" onClick={close}/>}
+ <aside className={cn('sidebar fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r bg-neutral-100 px-4 pb-3 pt-6 transition-[margin,transform] md:relative md:z-auto', !open && '-translate-x-full md:-ml-64 md:translate-x-0')}>
+ <div className="flex h-10 items-center gap-3 px-2"><Mark small/><span className="text-xl font-semibold tracking-tight">Ailya</span><Button variant="ghost" size="icon" className="ml-auto size-8 text-muted-foreground" onClick={close} aria-label="收起侧栏"><PanelLeftClose/></Button></div>
+ <Button variant="outline" className="mt-6 w-full justify-start bg-background text-xs shadow-none" onClick={()=>{newSession();navigate('chat');if(innerWidth<768)close()}}><Plus/>新会话</Button>
+ <Button variant="ghost" className="mt-1 justify-start text-xs text-muted-foreground" onClick={()=>setSearching(!searching)}><Search/>搜索会话</Button>
+ {searching && <div className="relative mt-2"><Input autoFocus className="h-9 pr-8 text-xs" placeholder="搜索会话" value={search} onChange={e=>setSearch(e.target.value)} aria-label="搜索会话"/><Button variant="ghost" size="icon" className="absolute right-1 top-1 size-7" onClick={()=>{setSearching(false);setSearch('')}} aria-label="关闭搜索"><X/></Button></div>}
+ <nav aria-label="工作台" className="mt-3 space-y-1 border-b pb-3">{[{ id: 'agents' as const, label: 'Agent', icon: Bot },{ id: 'groups' as const, label: 'Group', icon: Users },{ id: 'extensions' as const, label: '扩展', icon: Plug },{ id: 'tasks' as const, label: '定时任务', icon: Clock }].map(({id,label,icon:Icon})=><Button key={id} variant="ghost" aria-current={view===id?'page':undefined} className={cn('h-9 w-full justify-start text-xs font-normal',view===id&&'bg-neutral-200')} onClick={()=>{navigate(id);if(innerWidth<768)close()}}><Icon/>{label}</Button>)}</nav>
+ <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="会话列表">{['今天','历史会话','昨天'].map(group=>{const items=matches.filter(s=>s.group===group);return items.length ? <section className="mb-6" key={group}><h2 className="mb-2 px-2 text-xs text-muted-foreground">{group}</h2>{items.map(s=><div key={s.id} className={cn('group mb-1 flex items-center rounded-md hover:bg-accent',view==='chat'&&s.id===activeId&&'bg-neutral-200')}><Button variant="ghost" className="h-9 min-w-0 flex-1 justify-start px-2 text-xs font-normal hover:bg-transparent" onClick={()=>{select(s.id);navigate('chat');if(innerWidth<768)close()}}><span className="truncate">{s.title}</span></Button><Button variant="ghost" size="icon" className="mr-1 size-7 shrink-0 text-muted-foreground opacity-0 focus:opacity-100 group-hover:opacity-100 max-md:opacity-100" aria-label={`删除 ${s.title}`} onClick={()=>setDeleting(s.id)}><Trash2 className="size-3.5"/></Button></div>)}</section>:null})}{!matches.length&&<p className="p-2 text-xs text-muted-foreground">没有找到相关会话</p>}</nav>
+ <div className="mt-3 flex items-center gap-3 border-t px-2 pt-3"><span className="flex size-8 items-center justify-center rounded-full bg-neutral-200 text-xs">我</span><Settings/></div>
+ </aside><AlertDialog open={!!deleting} onOpenChange={v=>{if(!v)setDeleting(null)}}><AlertDialogContent aria-describedby={undefined} className="w-[calc(100%-2rem)] rounded-lg"><AlertDialogHeader><AlertDialogTitle>删除会话「{sessions.find(s=>s.id===deleting)?.title}」？</AlertDialogTitle></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction onClick={()=>{if(deleting)remove(deleting);setDeleting(null)}}>删除</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog></>
+}
+
+
+
+
