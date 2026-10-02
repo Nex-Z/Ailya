@@ -40,6 +40,10 @@ export function localTools(workspace:string,permission:string,authorize:Authoriz
  }}
  const shell=(process.platform==='win32'?createPowerShellTool:createBashTool)(root,{exposeSessionEnvironment:false,spawnHook:ctx=>({...ctx,env:Object.fromEntries(Object.entries(ctx.env).filter(([key])=>/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|HOME|USERPROFILE|COMSPEC|LANG|LC_ALL)$/i.test(key)))})})
  shell.description+=' This is a trusted host shell, NOT a directory sandbox. cwd is the selected workspace. Do not use rg. On Windows use PowerShell, never cross-shell destructive commands. Do not launch detached background processes. Core credentials are not inherited.'
+ const pythonAlias=process.platform==='win32'&&/[/\\]Microsoft[/\\]WindowsApps[/\\]/i.test(Bun.which('python')??'')
+ const pythonLauncher=process.platform==='win32'&&!!Bun.which('py')
+ if(pythonLauncher)shell.description+=' The py launcher is present on this host. Prefer py -3 for Python scripts and py -3 -c for short code.'
+ if(pythonAlias)shell.description+=' The python command resolves to a Windows Store app-execution alias, not a verified interpreter. Do not use it to run scripts; use py -3 if available, or inspect other installed runtimes.'
  const execute=shell.execute
  shell.execute=async(id,args,signal,update)=>{
   if(!args.command.trim()||args.command.length>20000)throw Error('命令为空或过长')
@@ -48,6 +52,10 @@ export function localTools(workspace:string,permission:string,authorize:Authoriz
   const before=await snapshot(root);signal?.throwIfAborted()
   let result:Awaited<ReturnType<typeof execute>>|undefined
   try{result=await execute(id,{...args,timeout:Math.max(1,Math.min(args.timeout??120,600))},signal,update);return result}
+  catch(error){
+   if(!signal?.aborted&&pythonAlias&&/(?:^|[;|\r\n])\s*python(?:3)?(?:\.exe)?\s/i.test(args.command))throw Error(`${error instanceof Error?error.message:'Shell command failed'}\nThe python executable on PATH is a Windows Store alias. ${pythonLauncher?'Use the installed py launcher (py -3), rather than retrying python.':'Inspect installed runtimes with Get-Command; do not assume Python is usable.'}`)
+   throw error
+  }
   finally{let complete=false;try{const after=await snapshot(root);diffSnapshots(before,after,changed);complete=before.complete&&after.complete}catch{ /* Preserve execution errors; do not fabricate diffs. */ }
    if(result&&!complete)result.content.push({type:'text',text:'Workspace diff scan is partial or unavailable. Large/excluded files and changes outside the workspace are not tracked.'})
   }

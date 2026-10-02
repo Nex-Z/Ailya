@@ -19,8 +19,8 @@ export class Storage {
     this.db.exec('CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY)')
     const version = this.db.query('SELECT max(version) AS version FROM schema_migrations').get() as {version:number|null}
     const current=version.version??0
-    if(current>6)throw Error('数据库版本高于当前 Core')
-    for(let next=current+1;next<=6;next++){
+    if(current>7)throw Error('数据库版本高于当前 Core')
+    for(let next=current+1;next<=7;next++){
       this.backup(`${path}.before-v${next}-${Date.now()}-${crypto.randomUUID()}`)
       const migration=readFileSync(new URL(`./migrations/${String(next).padStart(4,'0')}.sql`,import.meta.url),'utf8')
       this.db.transaction(()=>{this.db.exec(migration);this.db.run('INSERT INTO schema_migrations VALUES(?)',[next])})()

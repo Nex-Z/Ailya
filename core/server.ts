@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import {answersSchema} from './question-contracts'
 import { Core } from './core'
+import {permissionDecisionSchema} from './permissions'
 import type { ServerWebSocket } from 'bun'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
@@ -26,7 +27,7 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
   if(c.req.method!=='GET'&&core.storage.session<{parentSessionId?:string}>(c.req.param('id')!)?.parentSessionId)return c.json({error:'子 Agent 会话只读，请从主会话操作'},403)
   await next()
  })
- app.get('/api/health',c=>c.json({ok:true,version:6,vector:core.storage.get('SELECT vec_version() version')}))
+ app.get('/api/health',c=>c.json({ok:true,version:7,vector:core.storage.get('SELECT vec_version() version')}))
  app.post('/api/sessions/:id/questions/:questionId/draft',async c=>{
   const body=z.object({answers:answersSchema,revision:z.number().int().min(0)}).strict().parse(await c.req.json())
   return c.json(core.draftQuestion(idSchema.parse(c.req.param('id')),z.string().uuid().parse(c.req.param('questionId')),body.answers,body.revision))
@@ -69,8 +70,8 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
  })
  app.post('/api/policy',async c=>c.json(core.permissions.save(await c.req.json())))
  app.post('/api/sessions/:id/permissions/:permissionId',async c=>{
-  const body=z.object({allow:z.boolean()}).strict().parse(await c.req.json())
-  return c.json(core.decidePermission(idSchema.parse(c.req.param('id')),z.string().uuid().parse(c.req.param('permissionId')),body.allow))
+  const body=permissionDecisionSchema.parse(await c.req.json())
+  return c.json(core.decidePermission(idSchema.parse(c.req.param('id')),z.string().uuid().parse(c.req.param('permissionId')),body.allow,body.scope))
  })
  app.get('/api/sessions/:id/attachments/:attachmentId',c=>{
   const row=core.storage.get<AttachmentRow>('SELECT * FROM attachments WHERE session_id=? AND id=?',idSchema.parse(c.req.param('id')),z.string().uuid().parse(c.req.param('attachmentId')))

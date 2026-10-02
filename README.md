@@ -25,6 +25,8 @@ npx playwright test
 
 当前提供会话、富文本/工具消息、团队面板、提问、附件、文件差异、Agent/Group、扩展、定时任务和设置的原型交互。未发送附件暂存在浏览器；发送成功后附件字节及归属存入 Core SQLite，可刷新后下载。发送快捷键支持 Enter 或 Ctrl+Enter。
 
+附件支持 UTF-8 直接读取，也可通过 `export_attachment` 授权导出到工作空间，供 Shell、已有解析库或模型编写的脚本处理 PDF 等格式。详见 [附件与脚本回退](docs/implementation/attachment-fallback.md)；具体格式能否解析取决于实际工具及文件内容。
+
 首个真实 Core 会话阶段已接入，详见文末。调度和 MCP 已接入；IM、语音及运行时 Skills/Pi 插件仍未实装。浏览器中的模拟状态不得作为正式功能验收依据。
 
 ## 参考版
@@ -85,6 +87,8 @@ npm run session:verify:phase2  # 重放及负向控制；不刷新预期
 旧 `tests/*.spec.ts` 的原型场景仍保留，依赖冻结版演示数据/localStorage，不能直接作为当前 Core 的验收；当前正式路径使用 `tests/production-core.spec.ts`、`tests/production-permissions.spec.ts` 和 `tests/production-tools.spec.ts`。没有宣称旧原型全套在正式运行时通过。录制候选需人工审查后再成为受版本管理的重放基线，目前未自动接受或建立 CI。
 
 ## 第二阶段：权限与附件
+
+授权面板现支持“会话内允许”：同一会话中相同工具和完整参数免重复确认，刷新及 Core 重启后保留；SQLite v7 保存范围与执行审计，其他会话隔离。详见 [会话内授权与验证](docs/implementation/session-permissions.md)。
 
 已接入默认权限的单次允许/拒绝、SQLite 白名单与授权记录、刷新恢复授权、停止及重启后的授权失效；附件字节持久化、隔离的文本读取及下载；复用 Pi 精确编辑并生成真实差异。数据库自动迁移至 v2，升级前保留备份。详见 [实现、验证和剩余边界](docs/implementation/phase-2.md)。旧 v1 录制候选保留为历史证据，其工具 schema 与当前版本不同，phase2 命令保留用于历史对比；新增工具后的当前验收使用第三阶段重放，新旧候选不自动替换。
 ## 第三阶段：基础工具、调度与 MCP

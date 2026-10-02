@@ -48,7 +48,7 @@ test('v5 to v6 migration preserves history and creates a readable v5 backup',()=
  const storage=new Storage(path)
  try{
   expect(storage.session<{text:string}>('history')?.text).toBe('preserved')
-  expect(storage.get<{v:number}>('SELECT max(version) v FROM schema_migrations')?.v).toBe(6)
+  expect(storage.get<{v:number}>('SELECT max(version) v FROM schema_migrations')?.v).toBe(7)
   const backup=new Database(join(root,readdirSync(root).find(n=>n.startsWith('db.before-v6-'))!),{readonly:true})
   try{expect(backup.query('SELECT max(version) v FROM schema_migrations').get()).toEqual({v:5});expect(backup.query('SELECT id FROM sessions').get()).toEqual({id:'history'})}finally{backup.close()}
  }finally{storage.close();rmSync(root,{recursive:true,force:true})}
