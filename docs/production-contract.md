@@ -30,4 +30,4 @@
 - 正式业务数据和向量统一持久化于 SQLite，由 Core 管理。具体存储边界、迁移及向量验收见 [存储架构](storage-architecture.md)。原型 localStorage 不能作为生产持久层。
 - 选择问题可由 Agent 指定推荐项，标签紧邻选项文字；推荐不等于替用户选择或提交。
 
-- 上下文采用后台提前压缩、发送时校验预算、原始记录保留的机制；摘要不能替代 Core 任务状态。Ailya 必须支持事实记忆、用户偏好和任务经验的持续修订与用户管理。完整规则见 [上下文与记忆](context-memory.md)。自动压缩与 `/compact` 手动压缩已接入，见 [实现与验证](implementation/context-compaction.md)；长期记忆与偏好学习仍待实现。
+- 上下文采用后台提前压缩、发送时校验预算、原始记录保留的机制；摘要不能替代 Core 任务状态。Ailya 必须支持事实记忆、用户偏好和任务经验的持续修订与用户管理。完整规则见 [上下文与记忆](context-memory.md)。自动压缩与 `/compact` 手动压缩已接入，见 [实现与验证](implementation/context-compaction.md)；长期记忆设置管理、AI 对话内维护及跨会话检索已接入，见 [长期记忆首版](implementation/long-term-memory.md)；重复证据自动激活、后台学习与真实 embedding 验证仍待实现。

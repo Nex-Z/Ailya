@@ -27,7 +27,13 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
   if(c.req.method!=='GET'&&core.storage.session<{parentSessionId?:string}>(c.req.param('id')!)?.parentSessionId)return c.json({error:'子 Agent 会话只读，请从主会话操作'},403)
   await next()
  })
- app.get('/api/health',c=>c.json({ok:true,version:8,vector:core.storage.get('SELECT vec_version() version')}))
+ app.get('/api/health',c=>c.json({ok:true,version:9,vector:core.storage.get('SELECT vec_version() version')}))
+ app.get('/api/memories',c=>c.json({items:core.memories.list(),...core.memories.index.status()}))
+ app.post('/api/memories',async c=>c.json(core.memories.save(await c.req.json())))
+ app.post('/api/memories/config',async c=>c.json(core.memories.index.save(await c.req.json())))
+ app.post('/api/memories/reindex',async c=>{z.object({}).strict().parse(await c.req.json());return c.json(core.memories.index.rebuild())})
+ app.post('/api/memories/:id/decision',async c=>{const input=z.object({version:z.number().int().positive(),accept:z.boolean()}).strict().parse(await c.req.json());return c.json(core.memories.decide(z.string().uuid().parse(c.req.param('id')),input.version,input.accept))})
+ app.delete('/api/memories/:id',async c=>{const input=z.object({version:z.number().int().positive()}).strict().parse(await c.req.json());core.memories.remove(z.string().uuid().parse(c.req.param('id')),input.version);return c.json({ok:true})})
  app.post('/api/sessions/:id/questions/:questionId/draft',async c=>{
   const body=z.object({answers:answersSchema,revision:z.number().int().min(0)}).strict().parse(await c.req.json())
   return c.json(core.draftQuestion(idSchema.parse(c.req.param('id')),z.string().uuid().parse(c.req.param('questionId')),body.answers,body.revision))
@@ -92,7 +98,7 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
   const id=idSchema.parse(c.req.param('id'));if(core.storage.session<{parentSessionId?:string}>(id)?.parentSessionId)throw Error('子 Agent 会话只读')
   const ids=[...core.storage.all<{child_session_id:string}>('SELECT child_session_id FROM group_runs WHERE parent_session_id=?',id).map(r=>r.child_session_id),id]
   if(ids.some(id=>core.active.has(id)))throw Error('请先停止会话')
-  for(const id of ids)core.compaction.cancel(id)
+  for(const id of ids){core.compaction.cancel(id);core.memories.deleteSession(id)}
   core.storage.db.transaction(()=>{for(const id of ids){core.storage.db.run('DELETE FROM requests WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)',[id]);for(const table of ['events','transcripts','tasks'])core.storage.db.run(`DELETE FROM ${table} WHERE session_id=?`,[id]);core.storage.db.run('DELETE FROM sessions WHERE id=?',[id])}})();return c.json({ok:true})
  })
  const pump=(ws:ServerWebSocket<{cursor:number}>)=>{

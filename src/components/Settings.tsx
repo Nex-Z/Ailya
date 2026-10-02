@@ -1,3 +1,4 @@
+import {MemorySettings} from './MemorySettings'
 import {SearchSettings} from './SearchSettings'
 import { api } from '../lib/core-api'
 import { IMSettings } from './IMSettings'
@@ -10,7 +11,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './ui/select'
 import { usePreferences } from '../preferences'
-const sections=[{label:'基础',items:['常规','模型与连接','权限与安全']},{label:'使用情况',items:['Token 消耗']},{label:'连接与集成',items:['本地 Core','远程 IM']},{label:'数据',items:['会话与存储']}]
+const sections=[{label:'基础',items:['常规','模型与连接','权限与安全']},{label:'使用情况',items:['Token 消耗']},{label:'连接与集成',items:['本地 Core','远程 IM']},{label:'数据',items:['记忆','会话与存储']}]
 function Row({label,children}:{label:string;children:ReactNode}){return <div className="flex flex-col gap-3 border-b py-5 sm:flex-row sm:items-center sm:justify-between"><span className="shrink-0 text-sm">{label}</span><div className="w-full text-sm sm:max-w-[260px]">{children}</div></div>}
 function Choice({label,value,options,onChange}:{label:string;value:string;options:string[];onChange:(v:string)=>void}){return <Select value={value} onValueChange={onChange}><SelectTrigger aria-label={label}><SelectValue/></SelectTrigger><SelectContent>{options.map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select>}
 export function Settings(){
@@ -47,6 +48,7 @@ export function Settings(){
  <div className="flex min-w-0 flex-1 flex-col"><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8"><h2 className="mb-3 text-lg font-medium">{section}</h2>
  {section==='权限与安全'&&<Row label="风险授权白名单"><Textarea disabled={!policyReady} placeholder="每行一条正则表达式" className="min-h-28 font-mono" aria-label="风险授权白名单" value={draft.allowlist??''} onChange={e=>patch({allowlist:e.target.value})}/></Row>}
  {section==='常规'&&<><Row label="语言"><Choice label="语言" value={draft.language} options={['简体中文','English']} onChange={language=>patch({language})}/></Row><Row label="发送快捷键"><Choice label="发送快捷键" value={draft.sendKey} options={['Enter','Ctrl + Enter']} onChange={sendKey=>patch({sendKey})}/></Row><Row label="界面主题">浅色</Row><Row label="默认机器">本地</Row></>}
+ {section==='记忆'&&<MemorySettings/>}
  {section==='模型与连接'&&<><ModelSettings/><SearchSettings/></>}
  {section==='本地 Core'&&<><Row label="服务地址"><Input aria-label="Core 服务地址" value="http://127.0.0.1:4317" readOnly/></Row><Row label="连接状态">{health?.ok?'已连接':'未连接'}</Row><Row label="版本">{health?.version??'—'}</Row></>}
  {section==='远程 IM'&&<IMSettings items={draft.imConfigs??[{id:'legacy',platform:draft.imChannel,account:draft.imAccount,enabled:draft.imEnabled,scope:draft.imScope}]} onChange={imConfigs=>patch({imConfigs})}/>}

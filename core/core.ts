@@ -1,4 +1,6 @@
 import {isDeepStrictEqual} from 'node:util'
+import {Memories} from './memory'
+import {MEMORY_PROMPT,type MemoryRow} from './memory-contracts'
 import {Compaction,estimate,type CompactProfile} from './compaction'
 import {Questions,type QuestionRow} from './questions'
 import {answerText,type QuestionRequest} from './question-contracts'
@@ -37,6 +39,7 @@ export class Core {
  webSearch:WebSearch
  questions:Questions
  compaction:Compaction
+ memories:Memories
  active=new Map<string,{agent:Agent;done:Promise<void>;session:Session;taskId:string}>()
  private resuming=new Map<string,Promise<void>>()
  listeners=new Set<()=>void>()
@@ -69,6 +72,11 @@ export class Core {
   this.compaction=new Compaction(this.storage,(id,state)=>{
    const session=this.active.get(id)?.session??this.storage.session<Session>(id)
    if(session){if(state.jobId&&session.compaction?.jobId===state.jobId&&session.compaction.mode==='manual')state.mode='manual';session.compaction=state;this.publish(session,null,'context_compaction')}
+  })
+  this.memories=new Memories(this.storage,this.workspace,id=>{
+   this.compaction.cancel(id)
+   this.storage.db.run('DELETE FROM context_summaries WHERE session_id=?',[id])
+   this.storage.db.run('DELETE FROM context_segments WHERE session_id=?',[id])
   })
   if(process.env.DEEPSEEK_API_KEY&&!this.storage.get('SELECT id FROM providers WHERE id=?','deepseek'))this.saveProvider({id:'deepseek',name:'DeepSeek',baseUrl:'https://api.deepseek.com',models:['deepseek-chat']})
   this.scheduler=new Scheduler(this.storage,this.resources,(id,r,requestId)=>this.send(id,{requestId,text:r.instructions,context:{workspace:r.workspace,agent:r.agent,model:r.model,permission:r.permission}}))
@@ -121,7 +129,9 @@ export class Core {
   if(!provider||!provider.models.includes(pair[1]))throw Error('模型配置不存在')
   const runtime=modelRuntime(provider,pair[1]),p={model:runtime.model,maxTokens:runtime.options.maxTokens!}
   const history=this.active.get(sessionId)?.agent.state.messages??this.compaction.history(sessionId)
-  const projected=this.compaction.project(sessionId,history,p)
+  const session=this.storage.session<Session>(sessionId)
+  const memories=session?this.memories.context(this.memories.select(session.context.workspace,sessionId,session.messages.findLast(m=>m.role==='user')?.text??'')):[]
+  const projected=this.compaction.project(sessionId,[...memories,...history],p)
   const used=history.some(m=>m.role!=='system')?this.compaction.inputEstimate(p,projected.messages):0
   return {model:modelKey,used,capacity:p.model.contextWindow,inputBudget:this.compaction.budget(p),estimated:true,summaryId:projected.summary?.id??null}
  }
@@ -198,7 +208,7 @@ export class Core {
    Object.assign(reply,{text:'',reasoning:undefined,error:undefined,stopped:false,fileChanges:[],parts:[],durationMs:0,executing:true})
   }else{userMessageId=crypto.randomUUID();session.messages.push({id:userMessageId,role:'user',text:data.text,files:files.map(f=>f.name),attachmentIds:files.map(f=>f.id)});reply={id:crypto.randomUUID(),role:'assistant',text:'',parts:[],executing:true};session.messages.push(reply)}
   this.storage.db.transaction(()=>{this.storage.saveSession(session!);if(resume){this.storage.db.run("UPDATE tasks SET status='running',finished_at=NULL WHERE id=?",[taskId]);return}for(const file of files)this.storage.db.run('INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)',[file.id,sessionId,userMessageId,file.name,file.mime,file.size,file.hash,file.bytes,Date.now()]);this.storage.db.run('INSERT INTO tasks(id,session_id,request_id,status,started_at,data) VALUES(?,?,?,?,?,?)',[taskId,sessionId,data.requestId,'running',startedAt,JSON.stringify({messageId:reply.id,input:auditedInput,history,agentConfig:persona,groupConfig:group,memberConfigs:members,executionContext:{...session!.context}})]);if(child)this.storage.db.run('INSERT INTO group_runs VALUES(?,?,?,?,?,?)',[sessionId,taskId,child.parentSessionId,child.parentTaskId,child.toolCallId,child.persona.id])})()
-  const systemPrompt=resume&&saved.systemPrompt?saved.systemPrompt:SYSTEM_PROMPT+(persona?'\n\nAgent: '+persona.name+'\n'+persona.prompt:'')
+  const systemPrompt=resume&&saved.systemPrompt?saved.systemPrompt:SYSTEM_PROMPT+'\n\n'+MEMORY_PROMPT+(persona?'\n\nAgent: '+persona.name+'\n'+persona.prompt:'')
   if(!resume){const audit=JSON.parse(this.storage.get<Task>('SELECT * FROM tasks WHERE id=?',taskId)!.data);audit.runtimeProfile=profile;audit.systemPrompt=systemPrompt;this.storage.db.run('UPDATE tasks SET data=? WHERE id=?',[JSON.stringify(audit),taskId])}
   reply.phase='waiting'
   let ordinal=this.storage.get<{n:number}>('SELECT coalesce(max(ordinal),0) n FROM requests WHERE task_id=?',taskId)!.n
@@ -206,15 +216,20 @@ export class Core {
   let contextSummaryId:string|undefined
   let contextBudget:unknown
   let inputEstimate=0
+  let memoryReferences:{id:string;version:number}[]=[]
   const agent:Agent=new Agent({initialState:{model,systemPrompt,messages:history.filter(m=>m.role!=='system')},toolExecution:'sequential',getApiKey:()=>key??'local-no-key',transformContext:async(messages,signal)=>{
    this.saveTranscript(sessionId,messages)
-   const prepared=await this.compaction.prepare(sessionId,messages,compactProfile,signal,waiting=>{reply.phase=waiting?'compacting':'waiting';this.publish(session!,taskId,'context_wait')})
+   let remembered:MemoryRow[]=await this.memories.retrieve(workspace,child?.parentSessionId??sessionId,data.text,signal)
+   const epoch=this.memories.epoch
+   let prepared=await this.compaction.prepare(sessionId,[...this.memories.context(remembered),...messages],compactProfile,signal,waiting=>{reply.phase=waiting?'compacting':'waiting';this.publish(session!,taskId,'context_wait')})
+   if(this.memories.epoch!==epoch||remembered.some(m=>m.expires_at!==null&&m.expires_at<=Date.now())){remembered=this.memories.select(workspace,child?.parentSessionId??sessionId,data.text);prepared=this.compaction.project(sessionId,[...this.memories.context(remembered),...messages],compactProfile);if(this.compaction.inputEstimate(compactProfile,prepared.messages)>this.compaction.budget(compactProfile))throw Error('记忆已变化，上下文超过预算，请压缩后重试')}
+   memoryReferences=remembered.map(m=>({id:m.id,version:m.version}));this.memories.used(sessionId,remembered)
    contextSummaryId=prepared.summary?.id
    inputEstimate=estimate(prepared.messages)
    contextBudget={policyVersion:1,method:'conservative-estimate',estimatedInput:this.compaction.inputEstimate(compactProfile,prepared.messages),inputBudget:this.compaction.budget(compactProfile),cutoff:prepared.summary?.cutoff??0}
    return prepared.messages
   },streamFn:(m,context,options)=>{
-   this.storage.db.run('INSERT INTO requests VALUES(?,?,?,?)',[crypto.randomUUID(),taskId,++ordinal,JSON.stringify({version:2,model:{id:m.id,provider:m.provider,api:m.api,baseUrl:m.baseUrl},profileSource,context,options:runtimeOptions,contextSummaryId,contextBudget})])
+   this.storage.db.run('INSERT INTO requests VALUES(?,?,?,?)',[crypto.randomUUID(),taskId,++ordinal,JSON.stringify({version:2,model:{id:m.id,provider:m.provider,api:m.api,baseUrl:m.baseUrl},profileSource,context,options:runtimeOptions,contextSummaryId,contextBudget,memoryReferences})])
    return streamSimple(m as Model<'openai-completions'>,context,{...options,...runtimeOptions})
   }})
   const changed=(change:import('./contracts').FileChange)=>{reply.fileChanges=[...(reply.fileChanges??[]).filter(f=>f.path!==change.path),change];this.publish(session!,taskId,'file_changed');child?.changed(change)}
@@ -228,6 +243,8 @@ export class Core {
    agent.state.tools=agent.state.tools.filter(t=>t.name==='read_attachment'||allowed.has(t.name.startsWith('mcp_')?'MCP':t.name==='powershell'?'Shell':t.name==='web_search'?'联网搜索':t.name==='schedule_task'?'定时任务':['read','write','edit','ls','find','search_files','export_attachment'].includes(t.name)?'文件':''))
   }
   agent.state.tools=[...agent.state.tools,this.compaction.tool(sessionId)]
+  const memorySource=session.messages.findLast(m=>m.role==='user')
+  agent.state.tools=[...agent.state.tools,...this.memories.tools(workspace,child?.parentSessionId??sessionId,{sessionId,messageId:memorySource?.id??'',text:memorySource?.text??''},!!child||!!this.storage.get('SELECT id FROM schedule_runs WHERE id=?',data.requestId))]
   agent.state.tools=[...agent.state.tools,this.questions.tool(sessionId,taskId,child?.parentSessionId??sessionId,persona?.name??'Ailya',startedAt,()=>this.saveTranscript(sessionId,agent.state.messages))]
   if(group){
    const parameters=Type.Object({agent:Type.String({description:'Member ID or name'}),task:Type.String({minLength:1,maxLength:50000})})
@@ -387,7 +404,7 @@ export class Core {
   }
   for(const child of this.storage.all<{child_session_id:string}>('SELECT child_session_id FROM group_runs WHERE parent_session_id=?',id))this.stop(child.child_session_id,preserveQuestions)
  }
- async close(){this.scheduler.close();for(const id of new Set([...this.active.keys(),...this.resuming.keys()]))this.stop(id,true);await Promise.all([...this.active.values()].map(r=>r.done));await Promise.all(this.resuming.values());await this.compaction.close();this.storage.close();this.releaseLock()}
+ async close(){this.scheduler.close();for(const id of new Set([...this.active.keys(),...this.resuming.keys()]))this.stop(id,true);await Promise.all([...this.active.values()].map(r=>r.done));await Promise.all(this.resuming.values());await this.compaction.close();await this.memories.index.close();this.storage.close();this.releaseLock()}
 }
 
 

@@ -63,7 +63,7 @@ test('v6 migration preserves data and old once decisions; grants survive restart
  try{
   expect(db.session<{title:string}>('s')?.title).toBe('preserved')
   expect(db.get<{state:string;scope:string}>('SELECT state,scope FROM permission_requests WHERE id=?','old')).toEqual({state:'allowed',scope:'once'})
-  expect(db.get<{n:number}>('SELECT max(version) n FROM schema_migrations')?.n).toBe(8)
+  expect(db.get<{n:number}>('SELECT max(version) n FROM schema_migrations')?.n).toBe(9)
   expect(db.search('scope','model','1',[1,0])).toHaveLength(1)
   expect(Buffer.from(db.get<{bytes:Uint8Array}>('SELECT bytes FROM attachments')!.bytes).toString()).toBe('proof')
   const backup=new Database(join(root,readdirSync(root).find(n=>n.startsWith('db.before-v7-'))!),{readonly:true})
