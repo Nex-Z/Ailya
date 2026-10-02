@@ -42,6 +42,8 @@ Windows 使用 PowerShell，不使用 rg；查找用 Get-ChildItem / Select-Stri
 
 工程流程见 docs/quality/README.md，审查见 docs/quality/review.md，验证见 docs/quality/testing.md。按需使用 ailya-iterate、ailya-review、ailya-test、ailya-learn。已授权工作自主实现和修复；人工复核面向具体结果，不逐步索要许可。自审与独立审查如实区分。
 
+变更时结合当前代码、相关文档和验证结果辨别文档及 Skills 是否需要同步，按 [按需同步文档与 Skills](docs/quality/README.md#按需同步文档与-skills) 执行。需要更新时先说明范围、原因和具体内容，获得用户明确确认后再写入，事实纠错也一样；已有明确授权覆盖的范围不重复询问，新增范围另行确认。无影响则直接继续，不询问、不记录，也不为每次改动遍历全部文档和 Skills。
+
 经验按 .agents/lessons/README.md 管理：候选先验证，未经用户明确采纳不提升为约束性规则。不自动修改全局记忆、冻结基线或验收门槛；不以通过测试取代真实功能验收。
 
 ## 产品上下文与记忆
