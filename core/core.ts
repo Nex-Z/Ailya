@@ -1,4 +1,5 @@
 import {isDeepStrictEqual} from 'node:util'
+import {Compaction,estimate,type CompactProfile} from './compaction'
 import {Questions,type QuestionRow} from './questions'
 import {answerText,type QuestionRequest} from './question-contracts'
 import {Catalog,type AgentConfig} from './catalog'
@@ -35,6 +36,7 @@ export class Core {
  scheduler:Scheduler
  webSearch:WebSearch
  questions:Questions
+ compaction:Compaction
  active=new Map<string,{agent:Agent;done:Promise<void>;session:Session;taskId:string}>()
  private resuming=new Map<string,Promise<void>>()
  listeners=new Set<()=>void>()
@@ -64,6 +66,10 @@ export class Core {
    }
   }
   this.questions.recover()
+  this.compaction=new Compaction(this.storage,(id,state)=>{
+   const session=this.active.get(id)?.session??this.storage.session<Session>(id)
+   if(session){if(state.jobId&&session.compaction?.jobId===state.jobId&&session.compaction.mode==='manual')state.mode='manual';session.compaction=state;this.publish(session,null,'context_compaction')}
+  })
   if(process.env.DEEPSEEK_API_KEY&&!this.storage.get('SELECT id FROM providers WHERE id=?','deepseek'))this.saveProvider({id:'deepseek',name:'DeepSeek',baseUrl:'https://api.deepseek.com',models:['deepseek-chat']})
   this.scheduler=new Scheduler(this.storage,this.resources,(id,r,requestId)=>this.send(id,{requestId,text:r.instructions,context:{workspace:r.workspace,agent:r.agent,model:r.model,permission:r.permission}}))
   this.scheduler.start()
@@ -108,6 +114,29 @@ export class Core {
  key(id:string){const row=this.storage.get<{secret:string|null;config:string}>('SELECT secret,config FROM providers WHERE id=?',id);return row?.secret?decryptSecret(row.secret):id==='deepseek'&&row&&new URL(JSON.parse(row.config).baseUrl).origin==='https://api.deepseek.com'?process.env.DEEPSEEK_API_KEY:undefined}
  async models(input:unknown){const {apiKey,...p}=providerSchema.parse(input);const saved=this.providers().find(x=>x.id===p.id);const key=apiKey|| (saved?.baseUrl===p.baseUrl?this.key(p.id):undefined);const response=await fetch(p.baseUrl.replace(/\/+$/,'')+'/models',{headers:key?{Authorization:`Bearer ${key}`}:{},signal:AbortSignal.timeout(15000),redirect:'error'});if(!response.ok)throw Error(`模型列表请求失败（HTTP ${response.status}）`);return response.json()}
  publish(session:Session,taskId:string|null,kind:string){this.storage.db.transaction(()=>{this.storage.saveSession(session);this.storage.event(session.id,taskId,kind,session)})();for(const fn of this.listeners)fn()}
+ contextUsage(sessionId:string,modelKey:string){
+  const pair=JSON.parse(modelKey==='默认模型'?this.preferredModel():modelKey)
+  if(!Array.isArray(pair)||pair.length!==2)throw Error('模型无效')
+  const provider=this.providers().find(p=>p.id===pair[0]) as ProviderConfig|undefined
+  if(!provider||!provider.models.includes(pair[1]))throw Error('模型配置不存在')
+  const runtime=modelRuntime(provider,pair[1]),p={model:runtime.model,maxTokens:runtime.options.maxTokens!}
+  const history=this.active.get(sessionId)?.agent.state.messages??this.compaction.history(sessionId)
+  const projected=this.compaction.project(sessionId,history,p)
+  const used=history.some(m=>m.role!=='system')?this.compaction.inputEstimate(p,projected.messages):0
+  return {model:modelKey,used,capacity:p.model.contextWindow,inputBudget:this.compaction.budget(p),estimated:true,summaryId:projected.summary?.id??null}
+ }
+ compact(sessionId:string){
+  const session=this.storage.session<Session>(sessionId)
+  if(!session)throw Error('会话尚无可压缩的历史')
+  if(session.parentSessionId)throw Error('子 Agent 会话只读')
+  if(this.active.has(sessionId)||this.resuming.has(sessionId)||this.questions.forOwner(sessionId).length)throw Error('请在当前任务及提问结束后压缩')
+  const pair=JSON.parse(session.context.model==='默认模型'?this.preferredModel():session.context.model)
+  const provider=this.providers().find(p=>p.id===pair[0]) as ProviderConfig|undefined
+  if(!provider)throw Error('模型配置不存在')
+  const runtime=modelRuntime(provider,pair[1])
+  void this.compaction.start(sessionId,this.compaction.history(sessionId),{model:runtime.model,maxTokens:runtime.options.maxTokens!,apiKey:this.key(provider.id)},'manual')
+  return this.storage.session<Session>(sessionId)!.compaction
+ }
  send(sessionId:string,input:unknown,child?:ChildRun,resume?:Task){
   if(this.storage.session<Session>(sessionId)?.parentSessionId&&!child)throw Error('子 Agent 会话只读，请从主会话操作')
   const data=sendSchema.parse(input)
@@ -173,8 +202,19 @@ export class Core {
   if(!resume){const audit=JSON.parse(this.storage.get<Task>('SELECT * FROM tasks WHERE id=?',taskId)!.data);audit.runtimeProfile=profile;audit.systemPrompt=systemPrompt;this.storage.db.run('UPDATE tasks SET data=? WHERE id=?',[JSON.stringify(audit),taskId])}
   reply.phase='waiting'
   let ordinal=this.storage.get<{n:number}>('SELECT coalesce(max(ordinal),0) n FROM requests WHERE task_id=?',taskId)!.n
-  const agent=new Agent({initialState:{model,systemPrompt,messages:history.filter(m=>m.role!=='system')},toolExecution:'sequential',getApiKey:()=>key??'local-no-key',streamFn:(m,context,options)=>{
-   this.storage.db.run('INSERT INTO requests VALUES(?,?,?,?)',[crypto.randomUUID(),taskId,++ordinal,JSON.stringify({version:2,model:{id:m.id,provider:m.provider,api:m.api,baseUrl:m.baseUrl},profileSource,context,options:runtimeOptions})])
+  const compactProfile:CompactProfile={model,maxTokens:runtimeOptions.maxTokens!,apiKey:key}
+  let contextSummaryId:string|undefined
+  let contextBudget:unknown
+  let inputEstimate=0
+  const agent:Agent=new Agent({initialState:{model,systemPrompt,messages:history.filter(m=>m.role!=='system')},toolExecution:'sequential',getApiKey:()=>key??'local-no-key',transformContext:async(messages,signal)=>{
+   this.saveTranscript(sessionId,messages)
+   const prepared=await this.compaction.prepare(sessionId,messages,compactProfile,signal,waiting=>{reply.phase=waiting?'compacting':'waiting';this.publish(session!,taskId,'context_wait')})
+   contextSummaryId=prepared.summary?.id
+   inputEstimate=estimate(prepared.messages)
+   contextBudget={policyVersion:1,method:'conservative-estimate',estimatedInput:this.compaction.inputEstimate(compactProfile,prepared.messages),inputBudget:this.compaction.budget(compactProfile),cutoff:prepared.summary?.cutoff??0}
+   return prepared.messages
+  },streamFn:(m,context,options)=>{
+   this.storage.db.run('INSERT INTO requests VALUES(?,?,?,?)',[crypto.randomUUID(),taskId,++ordinal,JSON.stringify({version:2,model:{id:m.id,provider:m.provider,api:m.api,baseUrl:m.baseUrl},profileSource,context,options:runtimeOptions,contextSummaryId,contextBudget})])
    return streamSimple(m as Model<'openai-completions'>,context,{...options,...runtimeOptions})
   }})
   const changed=(change:import('./contracts').FileChange)=>{reply.fileChanges=[...(reply.fileChanges??[]).filter(f=>f.path!==change.path),change];this.publish(session!,taskId,'file_changed');child?.changed(change)}
@@ -187,6 +227,7 @@ export class Core {
    const allowed=new Set(persona.tools)
    agent.state.tools=agent.state.tools.filter(t=>t.name==='read_attachment'||allowed.has(t.name.startsWith('mcp_')?'MCP':t.name==='powershell'?'Shell':t.name==='web_search'?'联网搜索':t.name==='schedule_task'?'定时任务':['read','write','edit','ls','find','search_files','export_attachment'].includes(t.name)?'文件':''))
   }
+  agent.state.tools=[...agent.state.tools,this.compaction.tool(sessionId)]
   agent.state.tools=[...agent.state.tools,this.questions.tool(sessionId,taskId,child?.parentSessionId??sessionId,persona?.name??'Ailya',startedAt,()=>this.saveTranscript(sessionId,agent.state.messages))]
   if(group){
    const parameters=Type.Object({agent:Type.String({description:'Member ID or name'}),task:Type.String({minLength:1,maxLength:50000})})
@@ -237,6 +278,7 @@ export class Core {
    if(event.type==='tool_execution_start'){reply.parts??=[];reply.parts.push({type:'tool-call',toolCallId:event.toolCallId,toolName:event.toolName,args:event.args,argsText:JSON.stringify(event.args)})}
    if(event.type==='tool_execution_end'){const part=reply.parts?.find(p=>p.type==='tool-call'&&p.toolCallId===event.toolCallId);if(part?.type==='tool-call'){part.result=event.result;part.isError=event.isError}}
    if(event.type==='message_end'&&event.message.role==='assistant'){
+    this.compaction.observe(compactProfile,inputEstimate,event.message.usage)
     if(event.message.stopReason==='error')reply.error=event.message.errorMessage||'模型请求失败'
     if(event.message.stopReason==='aborted'&&!reply.error)reply.stopped=true
     if(event.message.stopReason==='length'){reply.error='模型达到本次输出上限，回复未完成。已完成的文件操作不会回滚，请检查后重试。';agent.abort()}
@@ -256,7 +298,8 @@ export class Core {
     if(!reply.stopped&&!reply.error&&!reply.text.trim()&&!reply.parts?.some(p=>p.type==='tool-call'&&p.result!==undefined&&!p.isError))reply.error='模型未返回有效回复，请重试。'
     const status=reply.stopped?'stopped':reply.error?'failed':'completed'
     this.storage.db.transaction(()=>{this.storage.db.run('UPDATE tasks SET status=?,finished_at=? WHERE id=?',[status,Date.now(),taskId]);this.storage.db.run('INSERT INTO transcripts VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET data=excluded.data',[sessionId,JSON.stringify(agent.state.messages)])})()
-    this.active.delete(sessionId);this.publish(session!,taskId,status);child?.update(session!)
+      this.active.delete(sessionId);this.publish(session!,taskId,status);child?.update(session!)
+      if(status==='completed')this.compaction.background(sessionId,agent.state.messages,compactProfile)
    }
   })
   this.active.set(sessionId,{agent,done,session,taskId});this.publish(session,taskId,resume?'resumed':'started');return taskId
@@ -334,6 +377,7 @@ export class Core {
  }
  decidePermission(sessionId:string,id:string,allowed:boolean,scope:import('./permissions').PermissionScope='once'){const result=this.permissions.decide(sessionId,id,allowed,scope);if(!allowed)this.stop(sessionId);return result}
  stop(id:string,preserveQuestions=false){
+  this.compaction?.cancel(id)
   if(!preserveQuestions)this.questions.cancel(id)
   const run=this.active.get(id)
   if(run){this.storage.db.run("UPDATE tasks SET status='stopping' WHERE id=?",[run.taskId]);const reply=run.session.messages.find(m=>m.executing);if(reply)reply.stopped=true;run.agent.abort()}
@@ -343,7 +387,7 @@ export class Core {
   }
   for(const child of this.storage.all<{child_session_id:string}>('SELECT child_session_id FROM group_runs WHERE parent_session_id=?',id))this.stop(child.child_session_id,preserveQuestions)
  }
- async close(){this.scheduler.close();for(const id of new Set([...this.active.keys(),...this.resuming.keys()]))this.stop(id,true);await Promise.all([...this.active.values()].map(r=>r.done));await Promise.all(this.resuming.values());this.storage.close();this.releaseLock()}
+ async close(){this.scheduler.close();for(const id of new Set([...this.active.keys(),...this.resuming.keys()]))this.stop(id,true);await Promise.all([...this.active.values()].map(r=>r.done));await Promise.all(this.resuming.values());await this.compaction.close();this.storage.close();this.releaseLock()}
 }
 
 

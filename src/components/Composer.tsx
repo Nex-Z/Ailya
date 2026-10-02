@@ -1,4 +1,6 @@
+import {ContextUsage} from './ContextUsage'
 import {ThinkingSelect} from './ThinkingSelect'
+import {api} from '../lib/core-api'
 import { useAttachments, type LocalAttachment } from '../attachments'
 import { usePreferences } from '../preferences'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './ui/select'
@@ -22,6 +24,8 @@ export function Composer({ blocked, commandOpen, setCommandOpen, draft, setDraft
  const sendKey = usePreferences(s => s.config.sendKey)
  const send = (text: string, entries: LocalAttachment[]) => aui.thread().append({ role: 'user', content: [{ type: 'text', text }], attachments: entries.map(({id,file}) => ({ id, type: 'file', name: file.name, file, content: [], status: { type: 'complete' } })) })
  const [dragging,setDragging] = useState(false)
+ const [compactError,setCompactError]=useState('')
+ const [compactPending,setCompactPending]=useState(false)
  const dragDepth = useRef(0)
  const addFiles = (incoming: FileList | File[]) => attachmentStore.add(sessionId, Array.from(incoming))
  const [active, setActive] = useState(0)
@@ -50,6 +54,16 @@ export function Composer({ blocked, commandOpen, setCommandOpen, draft, setDraft
  useEffect(() => { if (commandOpen) document.getElementById(`slash-option-${selected}`)?.scrollIntoView({ block: 'nearest' }) }, [selected, commandOpen])
 
  const select = (item: CommandItem) => {
+  if(item.action==='compact'){
+   if(compactPending)return
+   setCommandOpen(false);setCompactError('')
+   if(running||blocked){setCompactError('请在当前任务结束并连接 Core 后压缩');return}
+   if(!session.messages.length){setCompactError('会话尚无可压缩的历史');return}
+   setCompactPending(true)
+   if(slashDraft)setDraft('')
+   void api('/sessions/'+sessionId+'/compact',{}).catch(e=>setCompactError(e.message)).finally(()=>setCompactPending(false))
+   return
+  }
   if(mention){
    if(session.messages.length||running||!item.value)return
    setContext('agent',item.value);setExplicitAgent(true);setDraft(draft.slice(0,mention.start)+draft.slice(mention.end));setMention(null);setCommandOpen(false)
@@ -64,6 +78,8 @@ export function Composer({ blocked, commandOpen, setCommandOpen, draft, setDraft
  const submit = () => { if ((!draft.trim() && !files.length) || running || blocked || commandOpen) return; send(draft.trim(), files) }
  return <div className="composer-wrap relative" ref={wrapper} onDragEnter={e=>{if(!e.dataTransfer.types.includes('Files'))return;e.preventDefault();dragDepth.current++;setDragging(true)}} onDragOver={e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();e.dataTransfer.dropEffect='copy'}}} onDragLeave={e=>{e.preventDefault();dragDepth.current=Math.max(0,dragDepth.current-1);if(!dragDepth.current)setDragging(false)}} onDrop={e=>{if(!e.dataTransfer.types.includes('Files'))return;e.preventDefault();dragDepth.current=0;setDragging(false);addFiles(e.dataTransfer.files)}}>
   {commandOpen && <SlashCommand items={items} active={selected} select={select} context={session.context} locked={!!session.messages.length}/>}
+  {compactError&&<div role="alert" className="mb-2 text-sm text-destructive">{compactError}</div>}
+  {session.compaction?.mode==='manual'&&<div role="status" className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>{session.compaction.message}</span>{session.compaction.status==='running'&&<Button size="sm" variant="ghost" onClick={()=>{void api('/sessions/'+sessionId+'/compact/cancel',{}).catch(e=>setCompactError(e.message))}}>取消压缩</Button>}</div>}
 
    {files.length > 0 && <div className="composer-attachments mb-2 flex max-h-32 flex-wrap gap-2 overflow-y-auto">{files.map((f) => <span className="inline-flex max-w-full items-center gap-2 break-all rounded-md border bg-muted px-2 py-1 text-xs" key={f.id}><Paperclip size={12}/>{f.file.name}<button aria-label={`移除 ${f.file.name}`} onClick={() => attachmentStore.remove(sessionId, f.id)}><X size={12}/></button></span>)}</div>}
   <div className={`composer rounded-xl border bg-popover p-3 shadow-sm focus-within:ring-1 focus-within:ring-ring ${dragging ? 'ring-2 ring-ring bg-muted' : ''}`}>
@@ -77,7 +93,7 @@ export function Composer({ blocked, commandOpen, setCommandOpen, draft, setDraft
     }
     if (e.key === 'Enter' && !e.shiftKey && (sendKey === 'Ctrl + Enter' ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey)) { e.preventDefault(); submit() }
    }}/>
-   <div className="composer-actions mt-1 flex items-center gap-2 text-muted-foreground"><Button variant="ghost" size="icon" className="attachment-button" aria-label="添加附件" disabled={blocked} onClick={() => input.current?.click()}><Plus size={20}/></Button><Select value={session.context.permission??'default'} onValueChange={v=>useStore.setState(s=>({sessions:s.sessions.map(x=>x.id===session.id?{...x,context:{...x.context,permission:v as 'default'|'full'}}:x)}))}><SelectTrigger aria-label="执行权限" className={`h-8 w-auto gap-1 border-0 px-2 text-xs shadow-none ${session.context.permission==='full'?'bg-red-50 text-red-700 hover:bg-red-100':''}`}><SelectValue/></SelectTrigger><SelectContent><SelectItem value="default">默认权限</SelectItem><SelectItem value="full">所有权限</SelectItem></SelectContent></Select><input ref={input} type="file" disabled={blocked} multiple className="hidden" onChange={e => { addFiles(e.target.files || []); e.target.value = '' }}/><div className="model-slot ml-auto flex min-w-0 items-center"><ThinkingSelect/><ContextSelect kind="model"/></div><Button variant="ghost" size="icon" aria-label="语音输入" title="语音输入不可用" disabled><Mic size={18}/></Button><Button size="icon" className="send-button size-9 rounded-full" disabled={blocked || (!running && ((!draft.trim() && !files.length) || commandOpen))} onClick={running ? stop : submit} aria-label={running ? '停止生成' : '发送消息'}>{running ? <Square size={14} fill="currentColor"/> : <ArrowUp size={18}/>}</Button></div>
+   <div className="composer-actions mt-1 flex items-center gap-2 text-muted-foreground"><Button variant="ghost" size="icon" className="attachment-button" aria-label="添加附件" disabled={blocked} onClick={() => input.current?.click()}><Plus size={20}/></Button><Select value={session.context.permission??'default'} onValueChange={v=>useStore.setState(s=>({sessions:s.sessions.map(x=>x.id===session.id?{...x,context:{...x.context,permission:v as 'default'|'full'}}:x)}))}><SelectTrigger aria-label="执行权限" className={`h-8 w-auto gap-1 border-0 px-2 text-xs shadow-none ${session.context.permission==='full'?'bg-red-50 text-red-700 hover:bg-red-100':''}`}><SelectValue/></SelectTrigger><SelectContent><SelectItem value="default">默认权限</SelectItem><SelectItem value="full">所有权限</SelectItem></SelectContent></Select><input ref={input} type="file" disabled={blocked} multiple className="hidden" onChange={e => { addFiles(e.target.files || []); e.target.value = '' }}/><div className="model-slot ml-auto flex min-w-0 items-center"><ContextUsage/><ThinkingSelect/><ContextSelect kind="model"/></div><Button variant="ghost" size="icon" aria-label="语音输入" title="语音输入不可用" disabled><Mic size={18}/></Button><Button size="icon" className="send-button size-9 rounded-full" disabled={blocked || (!running && ((!draft.trim() && !files.length) || commandOpen))} onClick={running ? stop : submit} aria-label={running ? '停止生成' : '发送消息'}>{running ? <Square size={14} fill="currentColor"/> : <ArrowUp size={18}/>}</Button></div>
   </div>
  </div>
 }

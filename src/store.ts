@@ -4,9 +4,9 @@ import type { ThreadMessageLike } from '@assistant-ui/react'
 import { create } from 'zustand'
 import { api } from './lib/core-api'
 export type Context = { permission?:'default'|'full'; workspace: string; agent: string; model: string }
-export type Message = { reasoning?:string; phase?:'waiting'|'thinking'|'generating'|'tool'; attachmentIds?:string[]; questionStatus?:string; fileChanges?:FileChange[]; durationMs?:number; executing?:boolean; questionAnswer?:boolean; id: string; role: 'user' | 'assistant'; text: string; files?: string[]; activity?: boolean; stopped?: boolean; error?: string; parts?: Exclude<ThreadMessageLike['content'], string> }
+export type Message = { reasoning?:string; phase?:'waiting'|'thinking'|'generating'|'tool'|'compacting'; attachmentIds?:string[]; questionStatus?:string; fileChanges?:FileChange[]; durationMs?:number; executing?:boolean; questionAnswer?:boolean; id: string; role: 'user' | 'assistant'; text: string; files?: string[]; activity?: boolean; stopped?: boolean; error?: string; parts?: Exclude<ThreadMessageLike['content'], string> }
 export type PermissionRequest={id:string;tool:string;args:Record<string,unknown>;action:string;createdAt:number;taskId:string;toolCallId:string}
-export type Session = { permissionRequest?:PermissionRequest; questionRequest?:QuestionRequest; id: string; title: string; context: Context; messages: Message[]; group: string }
+export type Session = { compaction?:{status:'running'|'completed'|'failed'|'cancelled'|'skipped';mode:'auto'|'manual';jobId?:string;message?:string;before?:number;after?:number}; permissionRequest?:PermissionRequest; questionRequest?:QuestionRequest; id: string; title: string; context: Context; messages: Message[]; group: string }
 const context = { workspace: 'Ailya', agent: 'Ailya', model: '默认模型' }
 const draft=():Session=>({id:crypto.randomUUID(),title:'新会话',context:{...context},messages:[],group:'今天'})
 const first=draft()

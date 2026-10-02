@@ -27,7 +27,7 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
   if(c.req.method!=='GET'&&core.storage.session<{parentSessionId?:string}>(c.req.param('id')!)?.parentSessionId)return c.json({error:'子 Agent 会话只读，请从主会话操作'},403)
   await next()
  })
- app.get('/api/health',c=>c.json({ok:true,version:7,vector:core.storage.get('SELECT vec_version() version')}))
+ app.get('/api/health',c=>c.json({ok:true,version:8,vector:core.storage.get('SELECT vec_version() version')}))
  app.post('/api/sessions/:id/questions/:questionId/draft',async c=>{
   const body=z.object({answers:answersSchema,revision:z.number().int().min(0)}).strict().parse(await c.req.json())
   return c.json(core.draftQuestion(idSchema.parse(c.req.param('id')),z.string().uuid().parse(c.req.param('questionId')),body.answers,body.revision))
@@ -57,6 +57,7 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
   const events=core.storage.all<{data:string}>("SELECT data FROM events WHERE kind='pi.message_end' AND created_at>=?",since)
   const usage={input:0,output:0,cache:0}
   for(const row of events){const m=JSON.parse(row.data).message;if(m?.role==='assistant'&&m.usage){usage.input+=m.usage.input??0;usage.output+=m.usage.output??0;usage.cache+=(m.usage.cacheRead??0)+(m.usage.cacheWrite??0)}}
+  for(const row of core.storage.all<{response:string}>('SELECT response FROM context_requests JOIN context_jobs ON context_requests.job_id=context_jobs.id WHERE context_jobs.created_at>=? AND response IS NOT NULL',since)){const u=JSON.parse(row.response).usage;if(u){usage.input+=u.input??0;usage.output+=u.output??0;usage.cache+=(u.cacheRead??0)+(u.cacheWrite??0)}}
   return c.json(usage)
  })
  app.get('/api/policy',c=>c.json(core.permissions.policy()))
@@ -83,11 +84,15 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
  app.post('/api/providers/models',async c=>c.json(await core.models(await c.req.json())))
  app.delete('/api/providers/:id',c=>{const id=idSchema.parse(c.req.param('id'));core.storage.db.run('DELETE FROM providers WHERE id=?',[id]);return c.json({ok:true})})
  app.post('/api/sessions/:id/send',async c=>c.json({taskId:core.send(idSchema.parse(c.req.param('id')),await c.req.json())},202))
+ app.post('/api/sessions/:id/compact',async c=>{z.object({}).strict().parse(await c.req.json());return c.json(core.compact(idSchema.parse(c.req.param('id'))),202)})
+ app.get('/api/sessions/:id/context-usage',c=>c.json(core.contextUsage(idSchema.parse(c.req.param('id')),z.string().min(1).max(500).parse(c.req.query('model')))))
+ app.post('/api/sessions/:id/compact/cancel',async c=>{z.object({}).strict().parse(await c.req.json());core.compaction.cancel(idSchema.parse(c.req.param('id')));return c.json({ok:true})})
  app.post('/api/sessions/:id/stop',c=>{core.stop(idSchema.parse(c.req.param('id')));return c.json({ok:true})})
  app.delete('/api/sessions/:id',c=>{
   const id=idSchema.parse(c.req.param('id'));if(core.storage.session<{parentSessionId?:string}>(id)?.parentSessionId)throw Error('子 Agent 会话只读')
   const ids=[...core.storage.all<{child_session_id:string}>('SELECT child_session_id FROM group_runs WHERE parent_session_id=?',id).map(r=>r.child_session_id),id]
   if(ids.some(id=>core.active.has(id)))throw Error('请先停止会话')
+  for(const id of ids)core.compaction.cancel(id)
   core.storage.db.transaction(()=>{for(const id of ids){core.storage.db.run('DELETE FROM requests WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)',[id]);for(const table of ['events','transcripts','tasks'])core.storage.db.run(`DELETE FROM ${table} WHERE session_id=?`,[id]);core.storage.db.run('DELETE FROM sessions WHERE id=?',[id])}})();return c.json({ok:true})
  })
  const pump=(ws:ServerWebSocket<{cursor:number}>)=>{

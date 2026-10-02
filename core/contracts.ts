@@ -6,9 +6,9 @@ export const sendSchema=z.object({requestId:z.string().uuid(),text:z.string().ma
 export type ProviderConfig=Omit<z.infer<typeof providerSchema>,'apiKey'>
 export type SessionContext=z.infer<typeof contextSchema>
 export type Part={type:'text';text:string}|{type:'tool-call';toolCallId:string;toolName:string;args:Record<string,unknown>;argsText:string;result?:unknown;isError?:boolean}
-export type ChatMessage={reasoning?:string;phase?:'waiting'|'thinking'|'generating'|'tool',files?:string[];attachmentIds?:string[];id:string;role:'user'|'assistant';text:string;error?:string;stopped?:boolean;executing?:boolean;durationMs?:number;fileChanges?:FileChange[];parts?:Part[]}
+export type ChatMessage={reasoning?:string;phase?:'waiting'|'thinking'|'generating'|'tool'|'compacting',files?:string[];attachmentIds?:string[];id:string;role:'user'|'assistant';text:string;error?:string;stopped?:boolean;executing?:boolean;durationMs?:number;fileChanges?:FileChange[];parts?:Part[]}
 export type FileChange={path:string;added:number;deleted:number;kind:'modified'|'added'|'deleted';binary?:boolean;diff:string[]}
 export type PermissionRequest={id:string;tool:string;args:Record<string,unknown>;action:string;createdAt:number;taskId:string;toolCallId:string}
-export type Session={questionRequest?:import('./question-contracts').QuestionRequest;parentSessionId?:string;groupId?:string;agentId?:string;permissionRequest?:PermissionRequest;id:string;title:string;context:SessionContext;messages:ChatMessage[];group:string}
+export type Session={compaction?:import('./compaction').CompactState;questionRequest?:import('./question-contracts').QuestionRequest;parentSessionId?:string;groupId?:string;agentId?:string;permissionRequest?:PermissionRequest;id:string;title:string;context:SessionContext;messages:ChatMessage[];group:string}
 
 

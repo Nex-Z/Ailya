@@ -6,8 +6,9 @@ export const commands = [
  { key: 'agent' as const, label: '伙伴与团队', command: '/agent', description: '选择 Ailya、专业角色或 Agent 团队', icon: Bot, values: ['Ailya', 'Coder', 'Reviewer', 'Tester', 'Dev Team'] },
  { key: 'model' as const, label: '模型', command: '/model', description: '选择本次对话使用的模型', icon: Cpu, values: ['默认模型', '快速响应', '深度思考'] },
 ]
-export type CommandItem = { id: string; label: string; description: string; icon: typeof Folder; key?: keyof Context; value?: string; section: string; prompt?: string }
+export type CommandItem = { id: string; label: string; description: string; icon: typeof Folder; key?: keyof Context; value?: string; section: string; prompt?: string; action?:'compact' }
 const toolItems: CommandItem[] = [
+ { id: 'compact', label: '/compact · 压缩上下文', description: '压缩较早历史，保留原始记录', icon: BookOpen, section: '会话', action:'compact' },
  { id: 'schedule', label: '/schedule', description: '定时任务', icon: Terminal, section: '工具', prompt: '创建定时任务：' },
  { id: 'terminal', label: '/terminal', description: 'Shell 命令', icon: Terminal, section: '工具', prompt: '请帮我规划需要执行的 Shell 命令：' },
  { id: 'skill', label: '/skill', description: '代码审查 Skill', icon: BookOpen, section: '工具', prompt: '请使用代码审查 Skill 检查项目：' },

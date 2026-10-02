@@ -55,7 +55,7 @@ npx playwright test
 
 Session 测试规划包含 [事件回放与真实执行重放](docs/quality/session-replay.md) 两层；[与 DSH 的差异核对](docs/quality/dsh-comparison.md)记录 CI、性能、录制和迁移的补充要求。当前已实现最小 Session 执行重放，完整格式/并发场景仍待补齐。
 
-[上下文与记忆规范](docs/context-memory.md)定义后台压缩、预算、可追溯摘要，以及 Ailya 自身的记忆/偏好学习、纠正和删除。这是正式版需求，当前尚未实现；与仓库开发经验 Skills 分开。
+[上下文与记忆规范](docs/context-memory.md)定义后台压缩、预算、可追溯摘要，以及 Ailya 自身的记忆/偏好学习、纠正和删除。自动压缩及输入框 `/compact` 手动压缩已接入，原始历史保留，摘要由 Core / SQLite 管理；长期记忆和偏好学习仍待实现。详见 [压缩实现与验证](docs/implementation/context-compaction.md)，与仓库开发经验 Skills 分开。
 
 ## 首个真实执行阶段（2026-09-28）
 

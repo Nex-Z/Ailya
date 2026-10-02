@@ -25,7 +25,7 @@ test('v1 database upgrades in place retaining messages, providers and vectors',(
  old.run('INSERT INTO sessions VALUES(?,?,?)',['s',JSON.stringify({id:'s',messages:[{text:'old message'}]}),1]);old.run('INSERT INTO providers VALUES(?,?,?)',['p','{"id":"p"}','encrypted-reference'])
  old.run('INSERT INTO vector_sources VALUES(?,?,?,?,?,?,?,?)',['v','scope','model','1',2,'old text','oldhash',new Uint8Array(new Float32Array([1,0]).buffer)]);old.close(true)
  const db=new Storage(path)
- try{expect(db.session<{messages:{text:string}[]}>('s')!.messages[0].text).toBe('old message');expect(db.get<{secret:string}>('SELECT secret FROM providers')!.secret).toBe('encrypted-reference');expect(db.search('scope','model','1',[1,0])).toHaveLength(1);expect(db.get<{n:number}>('SELECT max(version) n FROM schema_migrations')!.n).toBe(7)}finally{db.close();rmSync(root,{recursive:true,force:true})}
+ try{expect(db.session<{messages:{text:string}[]}>('s')!.messages[0].text).toBe('old message');expect(db.get<{secret:string}>('SELECT secret FROM providers')!.secret).toBe('encrypted-reference');expect(db.search('scope','model','1',[1,0])).toHaveLength(1);expect(db.get<{n:number}>('SELECT max(version) n FROM schema_migrations')!.n).toBe(8)}finally{db.close();rmSync(root,{recursive:true,force:true})}
 })
 test('restart invalidates pending approval, clears UI request and does not execute old operation',async()=>{
  const root=mkdtempSync(join(tmpdir(),'ailya-permission-restart-')),path=join(root,'db.sqlite'),db=new Storage(path)
