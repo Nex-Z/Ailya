@@ -3,6 +3,7 @@ test('settings validate regex and preserve separate IM accounts',async({page})=>
  await page.goto('http://127.0.0.1:5173');
  await page.getByRole('button',{name:'设置',exact:true}).click();
  await expect(page.getByLabel('并发任务上限')).toHaveCount(0);
+ await page.getByRole('button',{name:'权限与安全',exact:true}).click();
  await page.getByLabel('风险授权白名单').fill('[');
  await page.getByRole('button',{name:'保存',exact:true}).click();
  await expect(page.getByRole('status')).toContainText('第 1 行');

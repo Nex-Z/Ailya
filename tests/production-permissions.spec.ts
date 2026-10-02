@@ -69,6 +69,8 @@ test('settings allowlist reaches Core and authorizes only the selected test path
  const policy=[previous,rule].filter(Boolean).join('\n')
  try{
   await page.goto(base);await page.getByRole('button',{name:'设置',exact:true}).click()
+  await expect(page.getByRole('textbox',{name:'风险授权白名单'})).toHaveCount(0)
+  await page.getByRole('button',{name:'权限与安全',exact:true}).click()
   await expect(page.getByRole('button',{name:'保存',exact:true})).toBeEnabled()
   await page.getByRole('textbox',{name:'风险授权白名单'}).fill(policy)
   await page.getByRole('button',{name:'保存',exact:true}).click();await expect(page.getByRole('status')).toHaveText('已保存')
