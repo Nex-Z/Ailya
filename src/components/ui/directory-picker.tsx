@@ -1,18 +1,15 @@
 import { useState } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { Button } from './button'
-
-type DirectoryWindow = Window & { showDirectoryPicker?: (options: { mode: 'read' }) => Promise<{ name: string }> }
+import {api} from '../../lib/core-api'
 
 export function DirectoryPicker({value,onChange}:{value:string;onChange:(path:string)=>void}) {
  const [error,setError]=useState('')
  const choose=async()=>{
   setError('')
-  const picker=(window as DirectoryWindow).showDirectoryPicker
-  if(!picker){setError('当前浏览器不支持系统目录选择，请使用 Chrome 或 Edge。');return}
   try {
-   const directory=await picker.call(window,{mode:'read'})
-   onChange(directory.name)
+   const directory=await api<{path:string|null}>('/workspaces/pick',{})
+   if(directory.path)onChange(directory.path)
   } catch(error) {
    if(error instanceof DOMException && error.name==='AbortError')return
    setError('无法打开目录，请重试。')

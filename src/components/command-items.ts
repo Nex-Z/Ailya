@@ -14,9 +14,9 @@ const toolItems: CommandItem[] = [
 ]
 export function getCommandItems(query: string, roles?: string[]): CommandItem[] {
  const text = query.replace(/^\//, '').toLowerCase()
- const category = commands.find(c => text.startsWith(c.command.slice(1) + ' '))
+ const category = commands.find(c => c.key!=='agent' && text.startsWith(c.command.slice(1) + ' '))
  if (category) { const search = text.slice(category.command.length).trim(); return (category.key === 'agent' && roles ? roles : category.key === 'model' ? ['默认模型',...useProviders.getState().items.flatMap(p=>p.models.map(m=>modelKey(p.id,m)))] : category.values).filter(v => v.toLowerCase().includes(search)).map(value => ({ id: `${category.key}-${value}`, label: category.key==='model'?modelLabel(value):value, description: category.label, icon: category.icon, key: category.key, value, section: '上下文' })) }
- return [...commands.map(c => ({ id: c.key, label: c.command, description: c.description, icon: c.icon, key: c.key, section: '上下文' })), ...toolItems].filter(c => `${c.label} ${c.description} ${c.section}`.toLowerCase().includes(text))
+ return [...commands.filter(c=>c.key!=='agent').map(c => ({ id: c.key, label: c.command, description: c.description, icon: c.icon, key: c.key, section: '上下文' })), ...toolItems].filter(c => `${c.label} ${c.description} ${c.section}`.toLowerCase().includes(text))
 }
 
 

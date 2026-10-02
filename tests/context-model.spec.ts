@@ -1,0 +1,25 @@
+import {test,expect} from '@playwright/test'
+test('existing chat keeps locked context visible and model remains selectable only while idle',async({page})=>{
+ const session={id:'context-test',title:'Context',group:'今天',context:{workspace:'C:\\Work\\Sample',agent:'Ailya',model:'["test","deepseek-v4-pro"]'},messages:[{id:'u',role:'user',text:'hello'},{id:'a',role:'assistant',text:'ok',executing:false}]}
+ await page.route('**/api/snapshot',route=>route.fulfill({json:{sessions:[session],providers:[{id:'test',name:'DeepSeek',models:['deepseek-v4-pro','deepseek-flash']}],cursor:999999999}}))
+ await page.route('**/api/model-selection',route=>route.fulfill({json:{model:route.request().postDataJSON().model}}))
+ await page.goto('http://127.0.0.1:5173')
+ await expect(page.getByRole('button',{name:'工作空间',exact:true})).toBeDisabled()
+ await expect(page.getByRole('combobox',{name:'运行机器',exact:true})).toBeDisabled()
+ await expect(page.getByRole('combobox',{name:'伙伴与团队',exact:true})).toHaveCount(0)
+ const model=page.getByRole('combobox',{name:'模型',exact:true})
+ await expect(model).toHaveText('deepseek-v4-pro');await expect(model).toBeEnabled()
+ await model.click()
+ await expect(page.getByRole('group',{name:'DeepSeek',exact:true})).toBeVisible()
+ await expect(page.getByRole('option',{name:'默认模型',exact:true})).toHaveCount(0)
+ await page.getByRole('option',{name:'deepseek-flash',exact:true}).click()
+ await expect(model).toHaveText('deepseek-flash')
+ await page.setViewportSize({width:390,height:844})
+ await page.getByRole('button',{name:'收起侧栏',exact:true}).click()
+ await page.getByRole('combobox',{name:'执行权限',exact:true}).click()
+ await page.getByRole('option',{name:'所有权限',exact:true}).click()
+ await page.screenshot({path:'artifacts/browser/model-groups-full-permission.png'})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+ session.messages[1].executing=true
+ await page.reload();await expect(model).toBeDisabled()
+})

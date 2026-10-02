@@ -7,3 +7,13 @@
 .assistant-body>.markdown-content:first-child>:first-child{margin-top:0}
 
 
+
+@media (max-width: 639px) {
+  .composer-actions:has([aria-label="思考深度"]) { flex-wrap: wrap; }
+  .composer-actions:has([aria-label="思考深度"]) .model-slot {
+    order: -1;
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .composer-actions:has([aria-label="思考深度"]) > button[aria-label="语音输入"] { margin-left: auto; }
+}

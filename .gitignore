@@ -31,3 +31,10 @@ releases/
 .env
 .env.*
 !.env.example
+
+# Core private data
+.ailya/
+*.sqlite
+*.sqlite-*
+*.before-v*
+*.sqlite.lock

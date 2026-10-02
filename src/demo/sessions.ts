@@ -5,7 +5,7 @@ const user = (id: string, text: string, files?: string[]): Message => ({ id, rol
 const reply = (id: string, text: string, extra: Partial<Message> = {}): Message => ({ id, role: 'assistant', text, ...extra })
 const tool = (id: string, toolName: string, args: Record<string, string>, result: string, isError = false) => ({ type: 'tool-call' as const, toolCallId: id, toolName, args, argsText: JSON.stringify(args), result, isError })
 export const demoSessions: Session[] = [complexSession,
- {id:'demo-questions',title:'提问 · 多问题确认',context,group:'历史会话',questionRequest:{id:'demo-questions-request',agent:'Ailya',questions:[
+ {id:'demo-questions',title:'提问 · 多问题确认',context,group:'历史会话',questionRequest:{taskId:'demo',toolCallId:'demo',createdAt:0,deadlineAt:0,startedAt:0,status:'interrupted',drafts:{},revision:0,id:'demo-questions-request',agent:'Ailya',questions:[
  {id:'scope',recommendedOptions:['聊天交互'],title:'这次先完成哪部分？',kind:'choice',options:['聊天交互','Agent 管理','定时任务']},
  {id:'checks',recommendedOptions:['构建','交互测试'],title:'需要执行哪些检查？',kind:'multiple',options:['构建','代码审查','交互测试']},
  {id:'requirements',title:'有哪些必须保留的交互？',kind:'text'},

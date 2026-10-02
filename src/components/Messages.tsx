@@ -36,7 +36,11 @@ function ToolGroup({indexes,active}:{indexes:number[];active:boolean}){
  const [open,setOpen]=useState(false)
  return <div className="my-3">{(!active||indexes.length>1)&&<Button variant="ghost" size="sm" aria-expanded={open} onClick={()=>setOpen(!open)} className="text-xs text-muted-foreground"><ChevronRight className={open?'rotate size-3':'size-3'}/>{indexes.length} 次工具调用</Button>}{(open?indexes:active?[indexes[indexes.length-1]]:[]).map(index=><IndexedPart key={index} index={index}/>)}</div>
 }
+function ReasoningPanel({text,thinking,open,toggle}:{text:string;thinking:boolean;open:boolean;toggle:()=>void}){
+ return <details open={open} className="reasoning-panel mb-3 text-xs text-muted-foreground"><summary className="cursor-pointer py-1" onClick={event=>{event.preventDefault();toggle()}}>{thinking?'正在思考':'思考过程'}</summary><div className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-l pl-3 leading-relaxed">{text}</div></details>
+}
 function Parts({assistant=false}:{assistant?:boolean}){
+ const [manualThinking,setManualThinking]=useState<boolean|null>(null)
  const parts=useAuiState(s=>s.message.parts)
  const id=useAuiState(s=>s.message.id)
  const status=useAuiState(s=>s.message.status)
@@ -48,21 +52,28 @@ function Parts({assistant=false}:{assistant?:boolean}){
  const groups=(indexes:number[])=>{const nodes:React.ReactNode[]=[];for(let k=0;k<indexes.length;k++){const i=indexes[k];if(parts[i].type==='tool-call'&&parts[i].toolName==='delegate_agent'){nodes.push(<IndexedPart key={i} index={i}/>)}else if(parts[i].type==='tool-call'){const batch=[i];while(k+1<indexes.length&&((part)=>part.type==='tool-call'&&part.toolName!=='delegate_agent')(parts[indexes[k+1]]))batch.push(indexes[++k]);nodes.push(<ToolGroup key={i} indexes={batch} active={!!active}/>)}else nodes.push(<IndexedPart key={i} index={i}/>)}return nodes}
  const all=parts.map((_,i)=>i)
 
+ const reasoning=source?.reasoning,phase=source?.phase
+ const thinkingOpen=manualThinking??(phase==='thinking')
+ const thinking=reasoning&&<ReasoningPanel key={id} text={reasoning} thinking={phase==='thinking'} open={thinkingOpen} toggle={()=>setManualThinking(!thinkingOpen)}/>
  const seconds=source?.durationMs===undefined?null:Math.max(1,Math.round(source.durationMs/1000))
  const elapsed=seconds===null?'耗时未记录':seconds>=60?`耗时 ${Math.floor(seconds/60)} 分 ${seconds%60} 秒`:`耗时 ${seconds} 秒`
  if(!assistant)return <>{all.map(i=><IndexedPart key={i} index={i}/>)}</>
- if(!hasTools||active)return <><div className="mb-3 text-xs text-muted-foreground">{elapsed}</div>{groups(all)}</>
- return <><Collapsible open={open} onOpenChange={setOpen}><CollapsibleTrigger asChild><Button variant="ghost" size="sm" className="mb-3 h-auto justify-start rounded-none p-0 text-xs font-normal text-muted-foreground">{elapsed}<ChevronRight className={open?'rotate size-3':'size-3'}/></Button></CollapsibleTrigger><CollapsibleContent>{groups(all.filter(i=>i!==final))}</CollapsibleContent></Collapsible>{final>=0&&<IndexedPart index={final}/>}</>
+ if(!hasTools||active)return <><div className="mb-3 text-xs text-muted-foreground">{elapsed}</div>{thinking}{groups(all)}</>
+ return <><Collapsible open={open} onOpenChange={setOpen}><CollapsibleTrigger asChild><Button variant="ghost" size="sm" className="mb-3 h-auto justify-start rounded-none p-0 text-xs font-normal text-muted-foreground">{elapsed}<ChevronRight className={open?'rotate size-3':'size-3'}/></Button></CollapsibleTrigger>{thinking}<CollapsibleContent>{groups(all.filter(i=>i!==final))}</CollapsibleContent></Collapsible>{final>=0&&<IndexedPart index={final}/>}</>
 }
 function QuestionRecord({children}:{children:React.ReactNode}){return <Collapsible className="my-4 rounded-lg border bg-popover"><CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between text-sm">问题与回答<span className="text-xs text-muted-foreground">已回答 · 展开</span></Button></CollapsibleTrigger><CollapsibleContent className="border-t p-4">{children}</CollapsibleContent></Collapsible>}
 function UserMessage() {
+ const sessionId=useStore(s=>s.activeId)
  const id=useAuiState(s=>s.message.id)
  const isAnswer=useStore(s=>s.sessions.find(x=>x.id===s.activeId)?.messages.find(m=>m.id===id)?.questionAnswer)
  if(isAnswer)return <MessagePrimitive.Root><QuestionRecord><Parts/></QuestionRecord></MessagePrimitive.Root>
- return <MessagePrimitive.Root className="user-message"><div><MessagePrimitive.Attachments>{({ attachment }) => <span className="file-chip"><FileText size={13}/>{attachment.name}</span>}</MessagePrimitive.Attachments><Parts/></div></MessagePrimitive.Root>
+ return <MessagePrimitive.Root className="user-message"><div><MessagePrimitive.Attachments>{({ attachment }) => <a className="file-chip" aria-label={`下载附件 ${attachment.name}`} href={`/api/sessions/${sessionId}/attachments/${attachment.id}`} download={attachment.name}><FileText size={13}/>{attachment.name}</a>}</MessagePrimitive.Attachments><Parts/></div></MessagePrimitive.Root>
 }
 function AssistantMessage() {
+ const awaitingQuestion=useStore(s=>!!s.sessions.find(x=>x.id===s.activeId)?.questionRequest)
+ const awaitingPermission=useStore(s=>!!s.sessions.find(x=>x.id===s.activeId)?.permissionRequest)
  const messageId=useAuiState(s=>s.message.id)
+ const phase=useStore(s=>s.sessions.find(x=>x.id===s.activeId)?.messages.find(m=>m.id===messageId)?.phase)
  const questionStatus=useStore(s=>s.sessions.find(x=>x.id===s.activeId)?.messages.find(m=>m.id===messageId)?.questionStatus)
  const files=useStore(s=>s.sessions.find(x=>x.id===s.activeId)?.messages.find(m=>m.id===messageId)?.fileChanges)
  const status = useAuiState(s => s.message.status)
@@ -71,21 +82,6 @@ function AssistantMessage() {
  const copied = useAuiState(s => s.message.isCopied)
  const running = useAuiState(s => s.thread.isRunning)
  const incomplete = status?.type === 'incomplete'
- return <MessagePrimitive.Root className="assistant-message"><div className="assistant-body min-w-0">{questionStatus?<details className="my-4 rounded-lg border p-3 text-sm"><summary>问题与回答 · {questionStatus}</summary><Parts assistant/></details>:<Parts assistant/>}{files&&files.length>0&&<FileChanges files={files}/>}{status?.type === 'running' && <div className="stream-state"><span className="pulse-dot"/>{hasText ? '正在生成…' : '正在整理思路…'}</div>}{incomplete && <div role={status.reason === 'error' ? 'alert' : 'status'} className={`message-status ${status.reason === 'error' ? 'error-status' : ''}`}>{status.reason === 'error' ? <><AlertCircle size={14}/><span>{typeof status.error === 'string' ? status.error : '回复失败，请重试。'}</span></> : '已停止生成'}</div>}<ActionBarPrimitive.Root className="message-actions">{hasText && status?.type !== 'running' && <ActionBarPrimitive.Copy className="copy-button" aria-label="复制回复">{copied ? <Check size={14}/> : <Copy size={14}/>}<span>{copied ? '已复制' : '复制'}</span></ActionBarPrimitive.Copy>}{isLast && !running && <ActionBarPrimitive.Reload className="copy-button" aria-label={incomplete ? '重试回复' : '重新生成'}><RotateCcw size={13}/>{incomplete ? '重试' : '重新生成'}</ActionBarPrimitive.Reload>}</ActionBarPrimitive.Root></div></MessagePrimitive.Root>
+ return <MessagePrimitive.Root className="assistant-message"><div className="assistant-body min-w-0">{questionStatus?<details className="my-4 rounded-lg border p-3 text-sm"><summary>问题与回答 · {questionStatus}</summary><Parts assistant/></details>:<Parts assistant/>}{files&&files.length>0&&<FileChanges files={files}/>}{status?.type === 'running' && <div className="stream-state"><span className="pulse-dot"/>{awaitingQuestion?'等待回答…':awaitingPermission?'等待授权…':phase==='thinking'?'正在思考…':phase==='tool'?'正在准备工具调用…':hasText ? '正在生成…' : '等待模型响应…'}</div>}{incomplete && <div role={status.reason === 'error' ? 'alert' : 'status'} className={`message-status ${status.reason === 'error' ? 'error-status' : ''}`}>{status.reason === 'error' ? <><AlertCircle size={14}/><span>{typeof status.error === 'string' ? status.error : '回复失败，请重试。'}</span></> : '已停止生成'}</div>}<ActionBarPrimitive.Root className="message-actions">{hasText && status?.type !== 'running' && <ActionBarPrimitive.Copy className="copy-button" aria-label="复制回复">{copied ? <Check size={14}/> : <Copy size={14}/>}<span>{copied ? '已复制' : '复制'}</span></ActionBarPrimitive.Copy>}{isLast && !running && !awaitingQuestion && <ActionBarPrimitive.Reload className="copy-button" aria-label={incomplete ? '重试回复' : '重新生成'}><RotateCcw size={13}/>{incomplete ? '重试' : '重新生成'}</ActionBarPrimitive.Reload>}</ActionBarPrimitive.Root></div></MessagePrimitive.Root>
 }
 export function Messages() { return <div className="messages" data-chat-engine="assistant-ui"><ThreadPrimitive.Messages>{({ message }) => message.role === 'user' ? <UserMessage/> : <AssistantMessage/>}</ThreadPrimitive.Messages></div> }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -18,6 +18,13 @@
 ## 当前验收边界
 
 浏览器前端已提供文件修改样例、问题计时和拒答/继续交互、权限选择、多 IM 独立配置及多行正则白名单。
-模型输出、文件统计仍为预设数据；后台持久执行、Shell 取消、权限执行、真实 IM、调度、文件读写、Pi 插件加载必须在 Core 实装后验证。
+当前 Core 已接入真实模型流、SQLite 会话与附件、后台执行、停止、文本读写/精确编辑及真实差异、逐次授权和白名单，验证记录见 [阶段一](implementation/phase-1.md) 与 [阶段二](implementation/phase-2.md)。Shell、调度、MCP 见 [第三阶段](implementation/phase-3-tools.md)，Agent/Group 见 [Group 执行](implementation/group-execution.md)。问题批次、固定 30 秒超时、拒答、草稿恢复与同任务续跑已接入 Core，见 [提问与续跑](implementation/questions-resume.md)。真实 IM、运行时 Skills/Pi 插件及完整文件生命周期仍待实现；保留的原型页面不代表这些能力完成。
 不能将配置保存、模拟回复或接口 mock 测试作为这些后端能力的验收结果。
 
+
+## 冻结后的补充决定
+
+- 正式业务数据和向量统一持久化于 SQLite，由 Core 管理。具体存储边界、迁移及向量验收见 [存储架构](storage-architecture.md)。原型 localStorage 不能作为生产持久层。
+- 选择问题可由 Agent 指定推荐项，标签紧邻选项文字；推荐不等于替用户选择或提交。
+
+- 上下文采用后台提前压缩、发送时校验预算、原始记录保留的机制；摘要不能替代 Core 任务状态。Ailya 必须支持事实记忆、用户偏好和任务经验的持续修订与用户管理。完整规则见 [上下文与记忆](context-memory.md)，当前尚未实装。

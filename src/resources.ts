@@ -1,27 +1,16 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { api } from './lib/core-api'
 export type ResourceKind = 'mcp' | 'skill' | 'task'
-export type Resource = { id:string; kind:ResourceKind; name:string; enabled:boolean; transport:'stdio'|'http'; command:string; endpoint:string; instructions:string; frequency:'daily'|'weekly'|'once'; time:string; weekday:string; date:string; timezone:string; agent:string; workspace:string; sourceSession?:string }
+export type Resource = { id:string; kind:ResourceKind; name:string; enabled:boolean; transport:'stdio'|'http'; command:string; endpoint:string; instructions:string; frequency:'daily'|'weekly'|'once'; time:string; weekday:string; date:string; timezone:string; agent:string; workspace:string; sourceSession?:string; model?:string;permission?:'default'|'full';env?:Record<string,string>;headers?:Record<string,string>;nextRun?:number|null;lastRun?:{status:string;session_id:string|null;error:string|null;due_at:number}|null }
 export const createResource = (kind:ResourceKind):Resource => ({id:crypto.randomUUID(),kind,name:'',enabled:false,transport:'stdio',command:'',endpoint:'',instructions:'',frequency:'daily',time:'',weekday:'1',date:'',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,agent:'Ailya',workspace:'Ailya'})
-export const useResources=create<{items:Resource[];save:(entry:Resource)=>string|null;remove:(id:string)=>void;toggle:(id:string)=>void}>()(persist((set,get)=>({
- items:[],
- save:entry=>{
-  if(!entry.name.trim())return '请输入名称。'
-  if(get().items.some(x=>x.id!==entry.id&&x.kind===entry.kind&&x.name.toLowerCase()===entry.name.trim().toLowerCase()))return '名称已存在。'
-  if(entry.kind==='mcp'){
-   if(entry.transport==='stdio'&&!entry.command.trim())return '请输入启动命令。'
-   if(entry.transport==='http'){try{const url=new URL(entry.endpoint);if(!['http:','https:'].includes(url.protocol))return '请输入 HTTP 或 HTTPS 地址。'}catch{return '请输入有效地址。'}}
-  }else if(!entry.instructions.trim())return entry.kind==='task'?'请输入任务内容。':'请输入 Skill 内容。'
-  if(entry.kind==='task'){
-   if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(entry.time))return '请选择执行时间。'
-   if(entry.frequency==='once'&&!entry.date)return '请选择日期。'
-   if(!entry.agent.trim()||!entry.workspace.trim())return '请选择 Agent 和工作空间。'
-  }
-  const clean={...entry,name:entry.name.trim()};set({items:get().items.some(x=>x.id===entry.id)?get().items.map(x=>x.id===entry.id?clean:x):[...get().items,clean]});return null
- },
- remove:id=>set({items:get().items.filter(x=>x.id!==id)}),
- toggle:id=>set({items:get().items.map(x=>x.id===id?{...x,enabled:!x.enabled}:x)})
-}),{name:'ailya-resources-v1'}))
+let imported=false
+export const useResources=create<{items:Resource[];error:string;load:()=>Promise<void>;save:(entry:Resource)=>Promise<string|null>;remove:(id:string)=>Promise<void>;toggle:(id:string)=>Promise<void>}>((set,get)=>({
+ items:[],error:'',
+ load:async()=>{try{if(!imported){const raw=localStorage.getItem('ailya-resources-v1');const legacy=raw?JSON.parse(raw)?.state?.items??[]:[];await api('/resources/import-prototype',legacy);imported=true}set({items:await api<Resource[]>('/resources'),error:''})}catch(e){try{set({items:await api<Resource[]>('/resources')})}catch{}set({error:e instanceof Error?e.message:'配置加载失败'})}},
+ save:async entry=>{try{const {nextRun:_,lastRun:__,...data}=entry;await api('/resources',data);await get().load();return null}catch(e){return e instanceof Error?e.message:'配置保存失败'}},
+ remove:async id=>{try{await api('/resources/'+id,{},'DELETE');await get().load()}catch(e){set({error:e instanceof Error?e.message:'删除失败'})}},
+ toggle:async id=>{const entry=get().items.find(x=>x.id===id);if(entry){const error=await get().save({...entry,enabled:!entry.enabled});set({error:error??''})}},
+}))
 export function taskFromMessage(text:string,sessionId:string,agent:string,workspace:string):Resource|null{
  if(!(/定时任务/.test(text)||/每天|每周/.test(text)&&/提醒|检查|整理|运行|执行|总结|汇总|帮我/.test(text)))return null
  const time=text.match(/(\d{1,2})(?:[:：](\d{2})|点(?:(\d{1,2})分?)?)/)

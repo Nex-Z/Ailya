@@ -1,0 +1,10 @@
+CREATE TABLE providers (id TEXT PRIMARY KEY, config TEXT NOT NULL, secret TEXT);
+CREATE TABLE sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), request_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, data TEXT NOT NULL);
+CREATE UNIQUE INDEX one_active_task ON tasks(session_id) WHERE status IN ('running','stopping');
+CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id), task_id TEXT REFERENCES tasks(id), kind TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX session_events ON events(session_id, seq);
+CREATE TABLE transcripts (session_id TEXT PRIMARY KEY REFERENCES sessions(id), data TEXT NOT NULL);
+CREATE TABLE requests (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), ordinal INTEGER NOT NULL, data TEXT NOT NULL, UNIQUE(task_id,ordinal));
+CREATE TABLE vector_sources (id TEXT PRIMARY KEY, scope TEXT NOT NULL, model TEXT NOT NULL, revision TEXT NOT NULL, dimensions INTEGER NOT NULL, content TEXT NOT NULL, hash TEXT NOT NULL, embedding BLOB NOT NULL);
+CREATE INDEX vector_scope ON vector_sources(scope,model,revision,dimensions);

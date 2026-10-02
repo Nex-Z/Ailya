@@ -1,0 +1,20 @@
+import {test,expect} from '@playwright/test'
+test('real workspace history searches by path and can be selected again after reload',async({page,request})=>{
+ const base='http://127.0.0.1:5173',items=await (await request.get(base+'/api/workspaces')).json()
+ expect(items.length).toBeGreaterThan(0)
+ const path=items[0].path
+ await page.goto(base);await page.getByRole('button',{name:'新会话',exact:true}).click()
+ const picker=page.getByRole('button',{name:'工作空间',exact:true})
+ await picker.click();await page.getByRole('combobox',{name:'搜索工作空间',exact:true}).fill(path)
+ await expect(page.getByRole('option',{name:path,exact:true})).toBeVisible()
+ await page.getByRole('option',{name:path,exact:true}).click();await expect(picker).toHaveAttribute('title',path)
+ await page.reload();await page.getByRole('button',{name:'新会话',exact:true}).click();await picker.click()
+ await page.getByRole('combobox',{name:'搜索工作空间',exact:true}).fill('no-workspace-matches-unique-value')
+ await expect(page.getByText('没有匹配的工作空间',{exact:true})).toBeVisible()
+ await expect(page.getByRole('button',{name:'选择其他文件夹',exact:true})).toBeVisible()
+ await page.getByRole('combobox',{name:'搜索工作空间',exact:true}).fill(path)
+ await expect(page.getByRole('option',{name:path,exact:true})).toHaveCount(1)
+ await page.screenshot({path:'artifacts/browser/workspace-history-desktop.png'})
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:'artifacts/browser/workspace-history-narrow.png'})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+})
