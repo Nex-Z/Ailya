@@ -7,13 +7,13 @@ import {workspaceGuard,walkFiles} from './workspace'
 import type {Authorize} from './tools'
 import type {FileChange} from './contracts'
 
-async function snapshot(root:string){
+export async function snapshot(root:string){
  const scan=await walkFiles(root),files=new Map<string,Buffer>();let bytes=0,complete=!scan.truncated
  const guard=workspaceGuard(root)
  for(const name of scan.files){try{const path=guard(name),size=statSync(path).size;if(size>512*1024||bytes+size>16*1024*1024){complete=false;continue}files.set(path,readFileSync(path));bytes+=size}catch{complete=false}}
  return {files,complete}
 }
-function diffSnapshots(before:Awaited<ReturnType<typeof snapshot>>,after:Awaited<ReturnType<typeof snapshot>>,changed:(c:FileChange)=>void){
+export function diffSnapshots(before:Awaited<ReturnType<typeof snapshot>>,after:Awaited<ReturnType<typeof snapshot>>,changed:(c:FileChange)=>void){
  for(const path of new Set([...before.files.keys(),...after.files.keys()])){
   const a=before.files.get(path),b=after.files.get(path)
   if(a?.equals(b??Buffer.alloc(0))&&b!==undefined)continue

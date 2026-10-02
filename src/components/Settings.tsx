@@ -1,4 +1,5 @@
 import {MemorySettings} from './MemorySettings'
+import {StorageSettings} from './StorageSettings'
 import {SearchSettings} from './SearchSettings'
 import { api } from '../lib/core-api'
 import { IMSettings } from './IMSettings'
@@ -52,7 +53,7 @@ export function Settings(){
  {section==='模型与连接'&&<><ModelSettings/><SearchSettings/></>}
  {section==='本地 Core'&&<><Row label="服务地址"><Input aria-label="Core 服务地址" value="http://127.0.0.1:4317" readOnly/></Row><Row label="连接状态">{health?.ok?'已连接':'未连接'}</Row><Row label="版本">{health?.version??'—'}</Row></>}
  {section==='远程 IM'&&<IMSettings items={draft.imConfigs??[{id:'legacy',platform:draft.imChannel,account:draft.imAccount,enabled:draft.imEnabled,scope:draft.imScope}]} onChange={imConfigs=>patch({imConfigs})}/>}
- {section==='会话与存储'&&<><Row label="会话存储">Core / SQLite</Row><Row label="配置存储">厂商、权限、扩展及定时任务：SQLite</Row><Row label="附件存储">Core / SQLite</Row><Row label="数据库">{health?.ok?'SQLite':'未连接'}</Row></>}
+ {section==='会话与存储'&&<StorageSettings/>}
  {section==='Token 消耗'&&<><div className="mb-6 flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-muted-foreground">{usage?'模型返回用量':'暂无用量记录'}</span><div className="w-36"><Choice label="统计周期" value={period} options={['今天','最近 7 天','最近 30 天']} onChange={setPeriod}/></div></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[['输入 Token',usage?.input??0],['输出 Token',usage?.output??0],['缓存 Token',usage?.cache??0]].map(([label,total])=><div key={label} className="rounded-lg border p-4"><div className="mb-2 text-xs text-muted-foreground">{label}</div><div className="text-xl tabular-nums">{Number(total).toLocaleString()}</div></div>)}</div><div className="mt-6 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="py-3 font-medium">Agent</th><th className="py-3 text-right font-medium">Token 总量</th></tr></thead><tbody>{[['Ailya',(usage?.input??0)+(usage?.output??0)+(usage?.cache??0)]].map(([name,total])=><tr key={name} className="border-b"><td className="py-4">{name}</td><td className="text-right tabular-nums">{Number(total).toLocaleString()}</td></tr>)}</tbody></table></div></>}
  </div>{editable&&<div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-4 sm:px-8"><span role="status" className="text-xs text-muted-foreground">{validation||(section==='权限与安全'?policyError:'')||(saved?'已保存':'')}</span><Button size="sm" disabled={section==='权限与安全'&&!policyReady} onClick={saveSection}>保存</Button></div>}</div></div>
  </DialogContent></Dialog>

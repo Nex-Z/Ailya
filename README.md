@@ -27,9 +27,11 @@ npx playwright test
 
 附件支持 UTF-8 直接读取，也可通过 `export_attachment` 授权导出到工作空间，供 Shell、已有解析库或模型编写的脚本处理 PDF 等格式。详见 [附件与脚本回退](docs/implementation/attachment-fallback.md)；具体格式能否解析取决于实际工具及文件内容。
 
-首个真实 Core 会话阶段已接入，详见文末。调度、MCP 和运行时 Skills 已接入；IM、语音及 Pi 插件仍未实装。浏览器中的模拟状态不得作为正式功能验收依据。
+首个真实 Core 会话阶段已接入，详见文末。调度、MCP、运行时 Skills 和 Pi 工具插件首版已接入；IM、语音及完整 Pi 扩展兼容仍未实装。浏览器中的模拟状态不得作为正式功能验收依据。
 
 运行时 Skills 可在「扩展 → Skills」新增或导入本地 `SKILL.md` 包，启用后分配给 Agent，或在输入框 `/skill` 命令列表中选择。Core 保存技能正文和随附文件，按任务固定版本；模型按需读取，脚本通过原有文件/Shell 权限执行。详见 [运行时 Skills 首版](docs/implementation/runtime-skills.md)。仓库 `.agents/skills` 不会自动安装到产品。
+
+「扩展 → 插件」已接入 npm、Git 和本地来源的真实安装、更新、重新加载、启停及卸载。包与任务版本由 Core SQLite v11 保存；插件是需要信任的主机代码，会话调用接入现有权限和停止流程。当前支持注册工具的 Pi 插件，不支持全部 Pi 钩子和界面扩展。详见 [运行时插件首版](docs/implementation/runtime-plugins.md)。
 
 ## 参考版
 
@@ -59,11 +61,17 @@ Session 测试规划包含 [事件回放与真实执行重放](docs/quality/sess
 
 [上下文与记忆规范](docs/context-memory.md)定义后台压缩、预算、可追溯摘要，以及 Ailya 自身的记忆/偏好学习、纠正和删除。自动压缩及输入框 `/compact` 手动压缩已接入，原始历史保留，摘要由 Core / SQLite 管理；设置中的长期记忆管理、AI 对话内维护及跨会话检索已接入，默认关键词检索，推断候选需确认。详见 [压缩实现与验证](docs/implementation/context-compaction.md) 和 [长期记忆首版](docs/implementation/long-term-memory.md)，与仓库开发经验 Skills 分开；重复证据自动学习和真实 embedding 验证仍待完成。
 
+## 本地启动与备份恢复（2026-10-02）
+
+安装依赖后使用 `npm start`：先构建网页，再后台启动 Core，访问 `http://127.0.0.1:4317`。也可在 PowerShell 运行 `.\Start-Ailya.ps1`，启动成功后打开浏览器。`npm run status` 查看状态，`npm run stop` 空闲关闭；开发模式仍可分别启动 Core/Vite。
+
+「设置 → 会话与存储」支持创建、下载、检查和恢复 SQLite 备份。恢复前自动备份当前数据，保留最新记忆删除记录；工作空间文件不随库恢复。详见 [备份恢复与启动说明](docs/implementation/backup-runtime.md)。目前仍依赖 Bun、Node/npm、源码与依赖目录，尚未提供安装包或开机自启。
+
 ## 首个真实执行阶段（2026-09-28）
 
 当前代码已在原界面上接入独立 Bun Core：厂商配置、Windows DPAPI 凭据、SQLite 会话/任务/事件/请求、Pi 模型流、停止、WebSocket 重连、工作空间内文本读写及真实差异。其余页面保留原型，不能视作后端已完成。详见 [阶段记录及验收边界](docs/implementation/phase-1.md)。
 
-需要 Bun 1.4.2（本次验证版本）及 Node/npm；安装依赖后，在两个终端运行：
+需要 Bun 1.4.2（本次验证版本）及 Node/npm；开发调试时可在两个终端运行：
 
 ```powershell
 npm ci
@@ -106,7 +114,7 @@ npx playwright test tests/production-tools.spec.ts --workers=1 # 运行中的 Co
 
 ## Agent / Group 执行（2026-09-29）
 
-自定义 Agent 与 Group 已接入真实 Pi 执行，配置由 Core SQLite 管理。Group 支持成员独立模型、主会话统一授权、取消传播、只读成员进度与刷新恢复。详见 [Group 实施与验证](docs/implementation/group-execution.md) 和 [单 Agent 阶段](docs/implementation/single-agent.md)。运行时 Skills/Pi 扩展仍未完成；旧样例中的未支持配置不会被当作已实现能力。
+自定义 Agent 与 Group 已接入真实 Pi 执行，配置由 Core SQLite 管理。Group 支持成员独立模型、主会话统一授权、取消传播、只读成员进度与刷新恢复。详见 [Group 实施与验证](docs/implementation/group-execution.md) 和 [单 Agent 阶段](docs/implementation/single-agent.md)。运行时 Skills 与 Pi 工具插件已接入；完整 Pi 扩展兼容仍未完成，旧样例中的未支持配置不会被当作已实现能力。
 
 ## 真实提问与续跑（2026-10-02）
 

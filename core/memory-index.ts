@@ -9,7 +9,7 @@ export class MemoryIndex {
  private controller=new AbortController()
  private pending?:Promise<void>
  private closed=false
- constructor(private storage:Storage,private changed:()=>void){storage.db.run("UPDATE memory_index_jobs SET status='pending' WHERE status='running'");this.start()}
+ constructor(private storage:Storage,private changed:()=>void,start=true){storage.db.run("UPDATE memory_index_jobs SET status='pending' WHERE status='running'");if(start)this.start()}
  config():Config{const row=this.storage.get<{value:string}>("SELECT value FROM core_settings WHERE key='memory-config'");const saved=row?JSON.parse(row.value):defaults;return {useEnabled:saved.useEnabled,embedding:saved.embedding}}
  save(raw:unknown){
   const input=memoryConfig.parse(raw),previous=this.config(),e=input.embedding

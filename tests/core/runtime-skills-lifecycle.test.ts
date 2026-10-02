@@ -18,7 +18,7 @@ test('v9 upgrade retains memory, history and vector data with readable pre-v10 b
  const storage=new Storage(path)
  try{
   expect(storage.session<{title:string}>('history')!.title).toBe('keep');expect(storage.get<{content:string}>('SELECT content FROM memories')!.content).toBe('keep');expect(storage.search('scope','model','rev',[1,0])).toHaveLength(1)
-  expect(storage.get<{v:number}>('SELECT max(version) v FROM schema_migrations')).toEqual({v:10})
+  expect(storage.get<{v:number}>('SELECT max(version) v FROM schema_migrations')).toEqual({v:11})
   const backup=new Database(join(root,readdirSync(root).find(n=>n.startsWith('db.before-v10-'))!),{readonly:true})
   try{expect(backup.query('SELECT max(version) v FROM schema_migrations').get()).toEqual({v:9});expect(backup.query('SELECT content FROM memories').get()).toEqual({content:'keep'})}finally{backup.close()}
  }finally{storage.close();rmSync(root,{recursive:true,force:true})}

@@ -25,7 +25,7 @@ export function AgentLibrary({ kind, start }: { kind: 'agents' | 'groups'; start
  useEffect(()=>{void loadResources()},[loadResources])
  const skillOptions=[...new Set([...resources.filter(r=>r.kind==='skill'&&r.enabled&&r.skill).map(r=>r.id),...form.skills])]
  const skillLabels=Object.fromEntries(resources.filter(r=>r.kind==='skill').map(r=>[r.id,r.name]))
- const toolOptions=[...new Set(['文件','Shell','联网搜索','定时任务','MCP',...builtInAgents.flatMap(a=>a.tools),...resources.filter(r=>r.kind==='mcp').map(r=>r.name),...form.tools])]
+ const toolOptions=[...new Set(['文件','Shell','联网搜索','定时任务','MCP','插件',...builtInAgents.flatMap(a=>a.tools),...resources.filter(r=>r.kind==='mcp').map(r=>r.name),...form.tools])]
  const [error,setError]=useState('')
  const [deleting,setDeleting]=useState<AgentConfig|GroupConfig|null>(null)
  const isGroup=kind==='groups'; const label=isGroup?'Group':'Agent'; const Icon=isGroup?Users:Bot

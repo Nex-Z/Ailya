@@ -1,0 +1,21 @@
+import {useEffect,useState} from 'react'
+import {api} from '../lib/core-api'
+import {Button} from './ui/button'
+import {Input} from './ui/input'
+import {AlertDialog,AlertDialogContent,AlertDialogTitle,AlertDialogFooter,AlertDialogCancel} from './ui/alert-dialog'
+type Backup={name:string;size:number;createdAt:number}
+type Preview={id:string;sourceVersion:number;counts:Record<string,number>}
+const labels:Record<string,string>={sessions:'会话',tasks:'任务',attachments:'附件',memories:'记忆',vector_sources:'向量',resources:'扩展与定时任务',skill_packages:'Skills',plugins:'插件'}
+export function StorageSettings(){
+ const [items,setItems]=useState<Backup[]>([]),[directory,setDirectory]=useState(''),[path,setPath]=useState(''),[preview,setPreview]=useState<Preview|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('')
+ const load=async()=>{const data=await api<{directory:string;items:Backup[]}>('/backups');setDirectory(data.directory);setItems(data.items)}
+ useEffect(()=>{let closed=false;void api<{directory:string;items:Backup[]}>('/backups').then(data=>{if(!closed){setDirectory(data.directory);setItems(data.items)}}).catch(e=>{if(!closed)setError(e.message)});return()=>{closed=true}},[])
+ const inspect=async(source:string)=>{setBusy(true);setError('');setNotice('');try{setPreview(await api<Preview>('/backups/preview',{path:source}))}catch(e){setError(e instanceof Error?e.message:'无法检查备份')}finally{setBusy(false)}}
+ return <div className="space-y-6 text-sm">
+  <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4"><span>Core / SQLite</span><Button size="sm" disabled={busy} onClick={async()=>{setBusy(true);setError('');try{await api('/backups',{});await load();setNotice('备份已创建')}catch(e){setError(e instanceof Error?e.message:'备份失败')}finally{setBusy(false)}}}>创建备份</Button></div>
+  <div className="space-y-2"><label htmlFor="backup-path">从本地备份恢复</label><div className="flex flex-wrap gap-2"><Input id="backup-path" className="min-w-0 flex-1 basis-48" placeholder="SQLite 备份文件的完整路径" value={path} onChange={e=>setPath(e.target.value)}/><Button size="sm" variant="outline" disabled={busy||!path.trim()} onClick={()=>void inspect(path.trim())}>检查备份</Button></div></div>
+  {error&&<p role="alert" className="break-words text-destructive">{error}</p>}{notice&&<p role="status">{notice}</p>}
+  <div className="space-y-3">{items.map(item=><div key={item.name} className="flex flex-wrap items-center gap-3 border-b pb-3"><div className="min-w-0 flex-1 basis-40"><div>{new Date(item.createdAt).toLocaleString()}</div><div className="mt-1 text-xs text-muted-foreground">{(item.size/1024/1024).toFixed(1)} MB</div></div><a className="text-primary underline-offset-4 hover:underline" href={'/api/backups/'+item.name+'/download'} download>下载</a><Button size="sm" variant="outline" disabled={busy} onClick={()=>void inspect(directory+'/'+item.name)}>恢复</Button></div>)}{!items.length&&<div className="py-6 text-center text-muted-foreground">暂无备份</div>}</div>
+  <AlertDialog open={!!preview} onOpenChange={open=>{if(!open&&!busy){if(preview)void api('/backups/preview/'+preview.id,{},'DELETE').catch(()=>{});setPreview(null)}}}><AlertDialogContent aria-describedby={undefined} className="max-h-[85dvh] w-[calc(100%-2rem)] overflow-y-auto rounded-xl"><AlertDialogTitle>恢复这份备份？</AlertDialogTitle><p className="text-sm">将替换当前数据、配置、插件和定时任务，并先保留一份恢复前备份。已删除记忆仍保持删除；工作空间文件不随数据库回滚。其他 Windows 用户或机器上的模型凭据可能需要重新填写。</p><dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">{Object.entries(preview?.counts??{}).map(([key,value])=><div className="flex justify-between gap-2" key={key}><dt>{labels[key]??key}</dt><dd>{value}</dd></div>)}</dl>{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}<AlertDialogFooter><AlertDialogCancel disabled={busy}>取消</AlertDialogCancel><Button disabled={busy} onClick={async()=>{if(!preview)return;setBusy(true);setError('');try{await api('/backups/restore',{id:preview.id,confirm:true});window.location.reload()}catch(e){setError(e instanceof Error?e.message:'恢复失败');setBusy(false);void load().catch(()=>{})}}}>{busy?'恢复中':'确认恢复'}</Button></AlertDialogFooter></AlertDialogContent></AlertDialog>
+ </div>
+}

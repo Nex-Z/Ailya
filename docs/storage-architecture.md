@@ -1,6 +1,6 @@
 # SQLite 与向量存储架构
 
-状态：正式版强制约束与实施设计；首阶段已接入 Core / SQLite 及向量底座，完整生命周期仍待实现，见 [阶段记录](implementation/phase-1.md)。
+状态：正式版强制约束与实施设计；首阶段已接入 Core / SQLite 及向量底座，备份恢复界面及一致性校验已接入，见 [备份恢复与启动](implementation/backup-runtime.md)；自动保留策略和发布产物验收仍待实现。首阶段见 [阶段记录](implementation/phase-1.md)。
 
 ## 存储边界
 

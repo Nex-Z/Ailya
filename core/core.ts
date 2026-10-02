@@ -1,3 +1,5 @@
+import {Plugins} from './plugins'
+import {PluginSession} from './plugin-session'
 import {isDeepStrictEqual} from 'node:util'
 import {Memories} from './memory'
 import {MEMORY_PROMPT,type MemoryRow} from './memory-contracts'
@@ -35,21 +37,24 @@ export class Core {
  releaseLock:()=>void
  permissions:Permissions
  resources:Resources
- scheduler:Scheduler
+ plugins:Plugins
+ scheduler!:Scheduler
  webSearch:WebSearch
  questions:Questions
  compaction:Compaction
- memories:Memories
+ memories!:Memories
  active=new Map<string,{agent:Agent;done:Promise<void>;session:Session;taskId:string}>()
  private resuming=new Map<string,Promise<void>>()
  listeners=new Set<()=>void>()
- constructor(public dataPath:string,public workspace=process.cwd()){
+ constructor(public dataPath:string,public workspace=process.cwd(),lease?:()=>void){
   this.workspace=realpathSync(workspace)
-  this.releaseLock=acquireCoreLock(dataPath)
-  try{this.storage=new Storage(dataPath)}catch(error){this.releaseLock();throw error}
+  this.releaseLock=lease??acquireCoreLock(dataPath)
+  try{this.storage=new Storage(dataPath)}catch(error){if(!lease)this.releaseLock();throw error}
+  try{
   this.permissions=new Permissions(this.storage)
   this.catalog=new Catalog(this.storage)
   this.resources=new Resources(this.storage,this.workspace)
+  this.plugins=new Plugins(this.storage,this.dataPath)
   this.webSearch=new WebSearch(this.storage)
   this.questions=new Questions(this.storage,(row,q)=>this.projectQuestion(row,q),owner=>this.stop(owner,true))
   for(const task of this.storage.all<Task>("SELECT * FROM tasks WHERE status IN ('running','stopping')")){
@@ -81,6 +86,7 @@ export class Core {
   if(process.env.DEEPSEEK_API_KEY&&!this.storage.get('SELECT id FROM providers WHERE id=?','deepseek'))this.saveProvider({id:'deepseek',name:'DeepSeek',baseUrl:'https://api.deepseek.com',models:['deepseek-chat']})
   this.scheduler=new Scheduler(this.storage,this.resources,(id,r,requestId)=>this.send(id,{requestId,text:r.instructions,context:{workspace:r.workspace,agent:r.agent,model:r.model,permission:r.permission}}))
   this.scheduler.start()
+  }catch(error){this.scheduler?.close();void this.memories?.index.close();this.storage.close();if(!lease)this.releaseLock();throw error}
  }
  providers(){return this.storage.all<{config:string;secret:string|null}>('SELECT config,secret FROM providers').map(r=>({...JSON.parse(r.config),hasKey:!!r.secret||JSON.parse(r.config).id==='deepseek'&&new URL(JSON.parse(r.config).baseUrl).origin==='https://api.deepseek.com'&&!!process.env.DEEPSEEK_API_KEY}))}
  preferredModel(){
@@ -167,7 +173,7 @@ export class Core {
   const persona:AgentConfig|undefined=resume?saved.agentConfig:child?.persona??(group?catalog.agents.find(a=>a.id===group.coordinator):ctx.agent==='Ailya'?undefined:session?.agentId?catalog.agents.find(a=>a.id===session?.agentId):namedAgent??catalog.agents.find(a=>a.id===ctx.agent))
   if(ctx.agent!=='Ailya'&&!persona)throw Error('Agent 或 Group 协调者不存在')
   const members:AgentConfig[]=resume?saved.memberConfigs??[]:group?group.members.map((id:string)=>{const member=catalog.agents.find(a=>a.id===id);if(!member)throw Error('Group 成员不存在');return member}):[]
-  if(persona?.tools.some(t=>!['文件','Shell','联网搜索','定时任务','MCP'].includes(t)))throw Error('Agent 配置包含尚未支持的工具')
+  if(persona?.tools.some(t=>!['文件','Shell','联网搜索','定时任务','MCP','插件'].includes(t)))throw Error('Agent 配置包含尚未支持的工具')
   if(persona&&persona.model!=='默认模型'&&!session)ctx.model=persona.model
   let providerId:string,modelId:string
   if(ctx.model==='默认模型'){const preferred=this.preferredModel();if(preferred==='默认模型')throw Error('请先配置模型厂商');[providerId,modelId]=JSON.parse(preferred)}
@@ -209,7 +215,7 @@ export class Core {
    history=JSON.parse(previous.data).history
    Object.assign(reply,{text:'',reasoning:undefined,error:undefined,stopped:false,fileChanges:[],parts:[],durationMs:0,executing:true})
   }else{userMessageId=crypto.randomUUID();session.messages.push({id:userMessageId,role:'user',text:data.text,files:files.map(f=>f.name),attachmentIds:files.map(f=>f.id)});reply={id:crypto.randomUUID(),role:'assistant',text:'',parts:[],executing:true};session.messages.push(reply)}
-  this.storage.db.transaction(()=>{this.storage.saveSession(session!);if(resume){this.storage.db.run("UPDATE tasks SET status='running',finished_at=NULL WHERE id=?",[taskId]);return}for(const file of files)this.storage.db.run('INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)',[file.id,sessionId,userMessageId,file.name,file.mime,file.size,file.hash,file.bytes,Date.now()]);this.storage.db.run('INSERT INTO tasks(id,session_id,request_id,status,started_at,data) VALUES(?,?,?,?,?,?)',[taskId,sessionId,data.requestId,'running',startedAt,JSON.stringify({messageId:reply.id,input:auditedInput,history,agentConfig:persona,groupConfig:group,memberConfigs:members,executionContext:{...session!.context}})]);this.resources.skills.snapshot(taskId,skillSet);if(child)this.storage.db.run('INSERT INTO group_runs VALUES(?,?,?,?,?,?)',[sessionId,taskId,child.parentSessionId,child.parentTaskId,child.toolCallId,child.persona.id])})()
+  this.storage.db.transaction(()=>{this.storage.saveSession(session!);if(resume){this.storage.db.run("UPDATE tasks SET status='running',finished_at=NULL WHERE id=?",[taskId]);return}for(const file of files)this.storage.db.run('INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)',[file.id,sessionId,userMessageId,file.name,file.mime,file.size,file.hash,file.bytes,Date.now()]);this.storage.db.run('INSERT INTO tasks(id,session_id,request_id,status,started_at,data) VALUES(?,?,?,?,?,?)',[taskId,sessionId,data.requestId,'running',startedAt,JSON.stringify({messageId:reply.id,input:auditedInput,history,agentConfig:persona,groupConfig:group,memberConfigs:members,executionContext:{...session!.context}})]);this.resources.skills.snapshot(taskId,skillSet);if(!persona||persona.tools.includes('插件'))this.plugins.snapshot(taskId);if(child)this.storage.db.run('INSERT INTO group_runs VALUES(?,?,?,?,?,?)',[sessionId,taskId,child.parentSessionId,child.parentTaskId,child.toolCallId,child.persona.id])})()
   const systemPrompt=resume&&saved.systemPrompt?saved.systemPrompt:SYSTEM_PROMPT+'\n\n'+MEMORY_PROMPT+this.resources.skills.prompt(skillSet)+(persona?'\n\nAgent: '+persona.name+'\n'+persona.prompt:'')
   if(!resume){const audit=JSON.parse(this.storage.get<Task>('SELECT * FROM tasks WHERE id=?',taskId)!.data);audit.runtimeProfile=profile;audit.systemPrompt=systemPrompt;this.storage.db.run('UPDATE tasks SET data=? WHERE id=?',[JSON.stringify(audit),taskId])}
   reply.phase='waiting'
@@ -238,13 +244,14 @@ export class Core {
   const authorize:Authorize=async(callId,tool,args,action,signal)=>{
    await this.permissions.request(child?.parentSessionId??sessionId,taskId,callId,tool,args,action,signal,request=>{session!.permissionRequest=request;reply.durationMs=Date.now()-startedAt;this.publish(session!,taskId,'permission');child?.showPermission(request)})
   }
+  const pluginSession=new PluginSession(this.plugins,this.plugins.selected(taskId),workspace,ctx.permission,authorize,changed)
   const mcp=new McpSession(this.resources,workspace,data.context.permission,authorize)
   agent.state.tools=[...fileTools(workspace,data.context.permission,()=>agent.signal,changed,authorize),attachmentTool(this.storage,child?.parentSessionId??sessionId),exportAttachmentTool(this.storage,child?.parentSessionId??sessionId,workspace,data.context.permission,authorize,changed),...localTools(workspace,data.context.permission,authorize,changed),this.webSearch.tool(),scheduleTools(this.resources,workspace,session.context.model,sessionId,data.context.permission,authorize),...mcp.tools()]
   if(persona){
    const allowed=new Set(persona.tools)
    agent.state.tools=agent.state.tools.filter(t=>t.name==='read_attachment'||allowed.has(t.name.startsWith('mcp_')?'MCP':t.name==='powershell'?'Shell':t.name==='web_search'?'联网搜索':t.name==='schedule_task'?'定时任务':['read','write','edit','ls','find','search_files','export_attachment'].includes(t.name)?'文件':''))
   }
-  agent.state.tools=[...agent.state.tools,this.compaction.tool(sessionId)]
+  agent.state.tools=[...agent.state.tools,...pluginSession.tools(),this.compaction.tool(sessionId)]
   agent.state.tools=[...agent.state.tools,...this.resources.skills.tools(taskId,skillSet,workspace,authorize,!persona||persona.tools.includes('文件'),ctx.permission,changed)]
   const memorySource=session.messages.findLast(m=>m.role==='user')
   agent.state.tools=[...agent.state.tools,...this.memories.tools(workspace,child?.parentSessionId??sessionId,{sessionId,messageId:memorySource?.id??'',text:memorySource?.text??''},!!child||!!this.storage.get('SELECT id FROM schedule_runs WHERE id=?',data.requestId))]
@@ -311,7 +318,7 @@ export class Core {
   const done=Promise.resolve().then(async()=>{
    try{if(this.storage.get<{status:string}>('SELECT status FROM tasks WHERE id=?',taskId)?.status==='stopping')reply.stopped=true;else if(resume)await agent.continue();else await agent.prompt(this.resources.skills.expand(taskId,data.text||'请查看附件。',skillSet)+attachmentPrompt(this.storage,sessionId,userMessageId))}catch(error){if(!reply.stopped)reply.error=error instanceof Error?error.message:'执行失败'}
    finally{
-    await mcp.close()
+    await mcp.close();await pluginSession.close()
     if(streamTimer)clearTimeout(streamTimer)
     streamTimer=undefined
     reply.executing=false;delete reply.phase;reply.durationMs=Date.now()-startedAt
@@ -407,7 +414,7 @@ export class Core {
   }
   for(const child of this.storage.all<{child_session_id:string}>('SELECT child_session_id FROM group_runs WHERE parent_session_id=?',id))this.stop(child.child_session_id,preserveQuestions)
  }
- async close(){this.scheduler.close();for(const id of new Set([...this.active.keys(),...this.resuming.keys()]))this.stop(id,true);await Promise.all([...this.active.values()].map(r=>r.done));await Promise.all(this.resuming.values());await this.compaction.close();await this.memories.index.close();this.storage.close();this.releaseLock()}
+ async close(release=true){this.scheduler.close();for(const id of new Set([...this.active.keys(),...this.resuming.keys()]))this.stop(id,true);await Promise.all([...this.active.values()].map(r=>r.done));await Promise.all(this.resuming.values());await this.compaction.close();await this.memories.index.close();await this.plugins.close();this.storage.close();if(release)this.releaseLock()}
 }
 
 

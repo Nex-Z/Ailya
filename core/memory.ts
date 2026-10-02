@@ -12,7 +12,7 @@ type Source={sessionId:string;messageId:string;text:string}
 export class Memories {
  index:MemoryIndex
  epoch=0
- constructor(private storage:Storage,private workspace:string,private invalidate:(id:string)=>void){this.index=new MemoryIndex(storage,()=>{this.epoch++;for(const s of storage.all<{session_id:string}>('SELECT DISTINCT session_id FROM memory_uses'))invalidate(s.session_id)})}
+ constructor(private storage:Storage,private workspace:string,private invalidate:(id:string)=>void,startIndex=true){this.index=new MemoryIndex(storage,()=>{this.epoch++;for(const s of storage.all<{session_id:string}>('SELECT DISTINCT session_id FROM memory_uses'))invalidate(s.session_id)},startIndex)}
  workspaceId(input:string){const path=realpathSync(input==='Ailya'?this.workspace:input);return process.platform==='win32'?path.toLowerCase():path}
  private scope(input:ReturnType<typeof memoryInput.parse>){
   if(input.scope==='global')return '*'

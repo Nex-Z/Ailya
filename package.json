@@ -17,7 +17,10 @@
     "test:browser:live": "playwright test tests/production-core.spec.ts tests/production-permissions.spec.ts --workers=1",
     "session:record:phase2": "bun scripts/session/phase2.ts record",
     "session:replay:phase2": "bun scripts/session/phase2.ts replay",
-    "session:verify:phase2": "bun scripts/session/phase2.ts verify"
+    "session:verify:phase2": "bun scripts/session/phase2.ts verify",
+    "start": "bun scripts/runtime.ts start",
+    "stop": "bun scripts/runtime.ts stop",
+    "status": "bun scripts/runtime.ts status"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.22",

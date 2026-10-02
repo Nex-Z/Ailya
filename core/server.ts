@@ -2,17 +2,22 @@ import type {AttachmentRow} from './attachments'
 import {pickWorkspace} from './workspace-picker'
 import {Workspaces} from './workspaces'
 import { Hono } from 'hono'
+import {Backups,replaceDatabase} from './backups'
+import {copyFileSync,existsSync,realpathSync,statSync} from 'node:fs'
+import {pluginInput} from './plugins'
 import { z } from 'zod'
 import {answersSchema} from './question-contracts'
 import { Core } from './core'
 import {permissionDecisionSchema} from './permissions'
 import type { ServerWebSocket } from 'bun'
-import { resolve } from 'node:path'
+import { resolve,dirname,relative,isAbsolute,join } from 'node:path'
 import { homedir } from 'node:os'
 const idSchema=z.string().min(1).max(100).regex(/^[\w-]+$/)
-export function startServer(options:{dataPath:string;workspace?:string;port?:number;origins?:string[]}) {
- const core=new Core(options.dataPath,options.workspace)
- const workspaces=new Workspaces(core.storage,core.workspace)
+export function startServer(options:{dataPath:string;workspace?:string;port?:number;origins?:string[];staticDir?:string;onShutdown?:()=>void}) {
+ let core=new Core(resolve(options.dataPath),options.workspace)
+ let workspaces=new Workspaces(core.storage,core.workspace)
+ const backups=new Backups(()=>core),instanceId=crypto.randomUUID()
+ let maintenance=false,inflight=0,available=true
  const app=new Hono()
  const sockets=new Set<ServerWebSocket<{cursor:number}>>()
  const allowed=new Set(options.origins??['http://127.0.0.1:5173','http://localhost:5173'])
@@ -20,14 +25,47 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
   const url=new URL(c.req.url),origin=c.req.header('Origin'),host=c.req.header('Host')?.split(':')[0]
   if(!['127.0.0.1','localhost'].includes(host??'')||(origin&&!allowed.has(origin)&&origin!==url.origin))return c.json({error:'来源未授权'},403)
   if(!['GET','HEAD'].includes(c.req.method)&&!c.req.header('Content-Type')?.startsWith('application/json'))return c.json({error:'需要 JSON 请求'},415)
-  await next()
+  if(maintenance)return c.json({error:'Core 正在恢复或关闭，请稍后重试'},503)
+  inflight++;try{await next()}finally{inflight--}
  })
  app.onError((error,c)=>c.json({error:error instanceof z.ZodError?'请求格式不正确':error.message},400))
  app.use('/api/sessions/:id/*',async(c,next)=>{
   if(c.req.method!=='GET'&&core.storage.session<{parentSessionId?:string}>(c.req.param('id')!)?.parentSessionId)return c.json({error:'子 Agent 会话只读，请从主会话操作'},403)
   await next()
  })
- app.get('/api/health',c=>c.json({ok:true,version:10,vector:core.storage.get('SELECT vec_version() version')}))
+ app.get('/api/health',c=>c.json({ok:true,service:'ailya-core',instanceId,pid:process.pid,dataPath:core.dataPath,workspace:core.workspace,web:!!options.staticDir,version:11,vector:core.storage.get('SELECT vec_version() version')}))
+ app.get('/api/backups',c=>c.json({directory:backups.root,items:backups.list()}))
+ app.post('/api/backups',async c=>{z.object({}).strict().parse(await c.req.json());return c.json(backups.create())})
+ app.get('/api/backups/:name/download',c=>new Response(Bun.file(backups.path(c.req.param('name'))),{headers:{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="${c.req.param('name')}"`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}}))
+ app.post('/api/backups/preview',async c=>{const {path}=z.object({path:z.string().min(1).max(4096)}).strict().parse(await c.req.json());return c.json(backups.preview(path))})
+ app.delete('/api/backups/preview/:id',c=>{backups.discard(z.string().uuid().parse(c.req.param('id')));return c.json({ok:true})})
+ app.post('/api/backups/restore',async c=>{
+  const {id}=z.object({id:z.string().uuid(),confirm:z.literal(true)}).strict().parse(await c.req.json())
+  if(inflight!==1)throw Error('其他请求尚未结束，请稍后重试')
+  maintenance=true;const previous=core;let closed=false;previous.scheduler.close()
+  try{return c.json(await backups.restore(id,async(path,rollback)=>{
+   const dataPath=previous.dataPath,workspace=previous.workspace,lease=previous.releaseLock
+   await previous.close(false);closed=true;available=false
+   try{replaceDatabase(path,dataPath);core=new Core(dataPath,workspace,lease)}
+   catch(error){const rollbackCopy=join(dirname(dataPath),`rollback-${crypto.randomUUID()}.sqlite`);copyFileSync(rollback,rollbackCopy);replaceDatabase(rollbackCopy,dataPath);core=new Core(dataPath,workspace,lease);available=true;throw Error('恢复失败，已还原恢复前数据：'+(error instanceof Error?error.message:'未知错误'))}
+   finally{if(available||core!==previous){available=true;workspaces=new Workspaces(core.storage,core.workspace);core.listeners.add(broadcast);for(const ws of sockets)ws.close(1012,'Database restored')}}
+  }))}finally{if(!closed)previous.scheduler.start();if(available)maintenance=false}
+ })
+ app.post('/api/runtime/shutdown',async c=>{
+  z.object({instanceId:z.literal(instanceId)}).strict().parse(await c.req.json())
+  if(!options.onShutdown)throw Error('当前启动方式不支持关闭服务')
+  if(inflight!==1||core.active.size||core.plugins.jobs.size||core.compaction.jobs.size)throw Error('请等待正在执行的任务完成后再关闭')
+  maintenance=true;setTimeout(()=>void close().then(options.onShutdown),50);return c.json({ok:true},202)
+ })
+ app.get('/api/plugins',c=>c.json(core.plugins.list()))
+ app.post('/api/plugins/import-prototype',async c=>c.json(core.plugins.importPrototype(await c.req.json())))
+ app.post('/api/plugins',async c=>{const {trusted:_trusted,...input}=pluginInput.extend({trusted:z.literal(true)}).strict().parse(await c.req.json());return c.json(core.plugins.start(input),202)})
+ app.post('/api/plugins/:id/action',async c=>{
+  const {action}=z.object({action:z.enum(['update','reload']),trusted:z.literal(true)}).strict().parse(await c.req.json()),id=z.string().uuid().parse(c.req.param('id')),p=core.plugins.get(id)
+  if(!p)throw Error('插件不存在');return c.json(core.plugins.start({id:p.id,kind:p.kind,source:p.source,enabled:!!p.enabled},action),202)
+ })
+ app.post('/api/plugins/:id/enabled',async c=>{const {enabled}=z.object({enabled:z.boolean()}).strict().parse(await c.req.json());core.plugins.setEnabled(z.string().uuid().parse(c.req.param('id')),enabled);return c.json({ok:true})})
+ app.delete('/api/plugins/:id',c=>{core.plugins.remove(z.string().uuid().parse(c.req.param('id')));return c.json({ok:true})})
  app.get('/api/memories',c=>c.json({items:core.memories.list(),...core.memories.index.status()}))
  app.post('/api/memories',async c=>c.json(core.memories.save(await c.req.json())))
  app.post('/api/memories/config',async c=>c.json(core.memories.index.save(await c.req.json())))
@@ -101,18 +139,28 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
   const ids=[...core.storage.all<{child_session_id:string}>('SELECT child_session_id FROM group_runs WHERE parent_session_id=?',id).map(r=>r.child_session_id),id]
   if(ids.some(id=>core.active.has(id)))throw Error('请先停止会话')
   for(const id of ids){core.compaction.cancel(id);core.memories.deleteSession(id)}
-  core.storage.db.transaction(()=>{for(const id of ids){core.storage.db.run('DELETE FROM requests WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)',[id]);for(const table of ['events','transcripts','tasks'])core.storage.db.run(`DELETE FROM ${table} WHERE session_id=?`,[id]);core.storage.db.run('DELETE FROM sessions WHERE id=?',[id])}})();return c.json({ok:true})
+  core.storage.db.transaction(()=>{for(const id of ids){core.storage.db.run('DELETE FROM requests WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)',[id]);for(const table of ['events','transcripts','tasks'])core.storage.db.run(`DELETE FROM ${table} WHERE session_id=?`,[id]);core.storage.db.run('DELETE FROM sessions WHERE id=?',[id])}core.plugins.collect()})();return c.json({ok:true})
  })
  const pump=(ws:ServerWebSocket<{cursor:number}>)=>{
   const rows=core.storage.all<{seq:number;kind:string;data:string}>('SELECT seq,kind,data FROM events WHERE seq>? ORDER BY seq LIMIT 1000',ws.data.cursor)
   for(const row of rows){if(!row.kind.startsWith('pi.')){const session=JSON.parse(row.data);if(!session.parentSessionId)ws.send(JSON.stringify({seq:row.seq,session}))}ws.data.cursor=row.seq}
   if(rows.length===1000)queueMicrotask(()=>{if(sockets.has(ws))pump(ws)})
  }
- const server=Bun.serve<{cursor:number}>({hostname:'127.0.0.1',port:options.port??4317,idleTimeout:60,maxRequestBodySize:24*1024*1024,
+ if(options.staticDir)app.get('*',async c=>{
+  if(c.req.path.startsWith('/api/'))return c.json({error:'接口不存在'},404)
+  const root=realpathSync(options.staticDir!),path=resolve(root,'.'+decodeURIComponent(c.req.path)),rel=relative(root,path)
+  if(rel.startsWith('..')||isAbsolute(rel))return c.notFound()
+  const file=existsSync(path)&&statSync(path).isFile()?realpathSync(path):join(root,'index.html'),actual=relative(root,file)
+  if(actual.startsWith('..')||isAbsolute(actual))return c.notFound()
+  return new Response(Bun.file(file),{headers:{'Cache-Control':file.endsWith('index.html')?'no-store':'public, max-age=31536000, immutable','X-Content-Type-Options':'nosniff'}})
+ })
+ let server:ReturnType<typeof Bun.serve<{cursor:number}>>
+ try{server=Bun.serve<{cursor:number}>({hostname:'127.0.0.1',port:options.port??4317,idleTimeout:60,maxRequestBodySize:24*1024*1024,
   fetch(req,server){
    const url=new URL(req.url)
    if(url.pathname==='/api/workspaces/pick')server.timeout(req,0)
    if(url.pathname==='/api/events'){
+    if(maintenance)return new Response('Maintenance',{status:503})
     const origin=req.headers.get('Origin'),host=req.headers.get('Host')?.split(':')[0]
     if(!['127.0.0.1','localhost'].includes(host??'')||(origin&&!allowed.has(origin)&&origin!==url.origin))return new Response('Forbidden',{status:403})
     const result=z.coerce.number().int().min(0).safeParse(url.searchParams.get('after')??0)
@@ -121,12 +169,17 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
     return new Response('Upgrade required',{status:426})
    }
    return app.fetch(req)
-  },websocket:{open(ws){sockets.add(ws);pump(ws)},message(){},close(ws){sockets.delete(ws)}}})
- core.listeners.add(()=>{for(const ws of sockets)pump(ws)})
- return {core,server,async close(){for(const ws of sockets)ws.close();await core.close();await server.stop(true)}}
+  },websocket:{open(ws){sockets.add(ws);pump(ws)},message(){},close(ws){sockets.delete(ws)}}})}catch(error){backups.close();void core.close();throw error}
+ function broadcast(){for(const ws of sockets)pump(ws)}
+ core.listeners.add(broadcast)
+ let closing:Promise<void>|undefined
+ function close(){return closing??=shutdown()}
+ async function shutdown(){maintenance=true;for(const ws of sockets)ws.close();backups.close();await core.close();await server.stop(true)}
+ return {get core(){return core},server,close}
 }
 if(import.meta.main){
- const app=startServer({dataPath:resolve(process.env.AILYA_DATA_DIR??resolve(process.env.LOCALAPPDATA??resolve(homedir(),'.local','share'),'Ailya','data'),'ailya.sqlite'),workspace:process.env.AILYA_WORKSPACE,port:Number(process.env.AILYA_PORT??4317)})
+ const staticDir=resolve(import.meta.dir,'../dist')
+ const app=startServer({dataPath:resolve(process.env.AILYA_DATA_DIR??resolve(process.env.LOCALAPPDATA??resolve(homedir(),'.local','share'),'Ailya','data'),'ailya.sqlite'),workspace:process.env.AILYA_WORKSPACE,port:Number(process.env.AILYA_PORT??4317),staticDir:existsSync(join(staticDir,'index.html'))?staticDir:undefined,onShutdown:()=>process.exit(0)})
  console.log(`Ailya Core http://127.0.0.1:${app.server.port}`)
  for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>{void app.close().then(()=>process.exit(0))})
 }
