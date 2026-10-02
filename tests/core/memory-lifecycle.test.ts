@@ -15,7 +15,7 @@ test('v8 migration preserves summaries and vectors; restart and backup restorati
  old.run('INSERT INTO transcripts VALUES(?,?)',['source','[]']);old.run('INSERT INTO context_summaries VALUES(?,?,?,?,?,?,?,?,?)',['summary','source',1,'hash','profile','old summary',10,2,1]);old.run('INSERT INTO vector_sources VALUES(?,?,?,?,?,?,?,?)',['v','scope','model','rev',2,'old vector','hash',new Uint8Array(new Float32Array([1,0]).buffer)]);old.close()
  let storage=new Storage(path),memories=new Memories(storage,workspace,()=>{})
  try{
-  expect(storage.get<{v:number}>('SELECT max(version) v FROM schema_migrations')?.v).toBe(11)
+  expect(storage.get<{v:number}>('SELECT max(version) v FROM schema_migrations')?.v).toBe(12)
   expect(storage.get<{summary:string}>('SELECT summary FROM context_summaries')?.summary).toBe('old summary');expect(storage.search('scope','model','rev',[1,0])).toHaveLength(1)
   const backupName=readdirSync(root).find(p=>p.includes('before-v9-'))!,pre=new Database(join(root,backupName),{readonly:true});try{expect(pre.query('SELECT max(version) v FROM schema_migrations').get()).toEqual({v:8})}finally{pre.close()}
   const m=memories.save({kind:'preference',topic:'语言',content:'使用中文',workspace})

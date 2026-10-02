@@ -1,4 +1,6 @@
 import {Plugins} from './plugins'
+import {IM} from './im'
+import {Speech} from './speech'
 import {PluginSession} from './plugin-session'
 import {isDeepStrictEqual} from 'node:util'
 import {Memories} from './memory'
@@ -38,6 +40,8 @@ export class Core {
  permissions:Permissions
  resources:Resources
  plugins:Plugins
+ im!:IM
+ speech:Speech
  scheduler!:Scheduler
  webSearch:WebSearch
  questions:Questions
@@ -55,6 +59,7 @@ export class Core {
   this.catalog=new Catalog(this.storage)
   this.resources=new Resources(this.storage,this.workspace)
   this.plugins=new Plugins(this.storage,this.dataPath)
+  this.speech=new Speech(this.storage)
   this.webSearch=new WebSearch(this.storage)
   this.questions=new Questions(this.storage,(row,q)=>this.projectQuestion(row,q),owner=>this.stop(owner,true))
   for(const task of this.storage.all<Task>("SELECT * FROM tasks WHERE status IN ('running','stopping')")){
@@ -86,6 +91,7 @@ export class Core {
   if(process.env.DEEPSEEK_API_KEY&&!this.storage.get('SELECT id FROM providers WHERE id=?','deepseek'))this.saveProvider({id:'deepseek',name:'DeepSeek',baseUrl:'https://api.deepseek.com',models:['deepseek-chat']})
   this.scheduler=new Scheduler(this.storage,this.resources,(id,r,requestId)=>this.send(id,{requestId,text:r.instructions,context:{workspace:r.workspace,agent:r.agent,model:r.model,permission:r.permission}}))
   this.scheduler.start()
+  this.im=new IM(this)
   }catch(error){this.scheduler?.close();void this.memories?.index.close();this.storage.close();if(!lease)this.releaseLock();throw error}
  }
  providers(){return this.storage.all<{config:string;secret:string|null}>('SELECT config,secret FROM providers').map(r=>({...JSON.parse(r.config),hasKey:!!r.secret||JSON.parse(r.config).id==='deepseek'&&new URL(JSON.parse(r.config).baseUrl).origin==='https://api.deepseek.com'&&!!process.env.DEEPSEEK_API_KEY}))}
@@ -414,7 +420,7 @@ export class Core {
   }
   for(const child of this.storage.all<{child_session_id:string}>('SELECT child_session_id FROM group_runs WHERE parent_session_id=?',id))this.stop(child.child_session_id,preserveQuestions)
  }
- async close(release=true){this.scheduler.close();for(const id of new Set([...this.active.keys(),...this.resuming.keys()]))this.stop(id,true);await Promise.all([...this.active.values()].map(r=>r.done));await Promise.all(this.resuming.values());await this.compaction.close();await this.memories.index.close();await this.plugins.close();this.storage.close();if(release)this.releaseLock()}
+ async close(release=true){this.scheduler.close();await this.im.close();for(const id of new Set([...this.active.keys(),...this.resuming.keys()]))this.stop(id,true);await Promise.all([...this.active.values()].map(r=>r.done));await Promise.all(this.resuming.values());await this.compaction.close();await this.memories.index.close();await this.plugins.close();this.storage.close();if(release)this.releaseLock()}
 }
 
 

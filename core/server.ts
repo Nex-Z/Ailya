@@ -2,6 +2,7 @@ import type {AttachmentRow} from './attachments'
 import {pickWorkspace} from './workspace-picker'
 import {Workspaces} from './workspaces'
 import { Hono } from 'hono'
+import {IM} from './im'
 import {Backups,replaceDatabase} from './backups'
 import {copyFileSync,existsSync,realpathSync,statSync} from 'node:fs'
 import {pluginInput} from './plugins'
@@ -33,7 +34,15 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
   if(c.req.method!=='GET'&&core.storage.session<{parentSessionId?:string}>(c.req.param('id')!)?.parentSessionId)return c.json({error:'子 Agent 会话只读，请从主会话操作'},403)
   await next()
  })
- app.get('/api/health',c=>c.json({ok:true,service:'ailya-core',instanceId,pid:process.pid,dataPath:core.dataPath,workspace:core.workspace,web:!!options.staticDir,version:11,vector:core.storage.get('SELECT vec_version() version')}))
+ app.get('/api/health',c=>c.json({ok:true,service:'ailya-core',instanceId,pid:process.pid,dataPath:core.dataPath,workspace:core.workspace,web:!!options.staticDir,version:12,vector:core.storage.get('SELECT vec_version() version')}))
+ app.get('/api/im',c=>c.json(core.im.list()))
+ app.post('/api/im',async c=>c.json(await core.im.save(await c.req.json())))
+ app.delete('/api/im/:id',async c=>{await core.im.remove(z.string().uuid().parse(c.req.param('id')));return c.json({ok:true})})
+ app.post('/api/im/:id/login',async c=>{z.object({}).strict().parse(await c.req.json());return c.json(await core.im.login(z.string().uuid().parse(c.req.param('id'))))})
+ app.post('/api/im/:id/verify',async c=>{const {code}=z.object({code:z.string()}).strict().parse(await c.req.json());core.im.verify(z.string().uuid().parse(c.req.param('id')),code);return c.json({ok:true})})
+ app.get('/api/speech/config',c=>c.json(core.speech.config()))
+ app.post('/api/speech/config',async c=>c.json(core.speech.save(await c.req.json())))
+ app.post('/api/speech/transcribe',async c=>{const raw=await c.req.text();if(raw.length>8_001_000)throw Error('录音过大');return c.json(await core.speech.transcribe(JSON.parse(raw),c.req.raw.signal))})
  app.get('/api/backups',c=>c.json({directory:backups.root,items:backups.list()}))
  app.post('/api/backups',async c=>{z.object({}).strict().parse(await c.req.json());return c.json(backups.create())})
  app.get('/api/backups/:name/download',c=>new Response(Bun.file(backups.path(c.req.param('name'))),{headers:{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="${c.req.param('name')}"`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}}))
@@ -42,14 +51,14 @@ export function startServer(options:{dataPath:string;workspace?:string;port?:num
  app.post('/api/backups/restore',async c=>{
   const {id}=z.object({id:z.string().uuid(),confirm:z.literal(true)}).strict().parse(await c.req.json())
   if(inflight!==1)throw Error('其他请求尚未结束，请稍后重试')
-  maintenance=true;const previous=core;let closed=false;previous.scheduler.close()
+  maintenance=true;const previous=core;let closed=false;previous.scheduler.close();await previous.im.close()
   try{return c.json(await backups.restore(id,async(path,rollback)=>{
    const dataPath=previous.dataPath,workspace=previous.workspace,lease=previous.releaseLock
    await previous.close(false);closed=true;available=false
    try{replaceDatabase(path,dataPath);core=new Core(dataPath,workspace,lease)}
    catch(error){const rollbackCopy=join(dirname(dataPath),`rollback-${crypto.randomUUID()}.sqlite`);copyFileSync(rollback,rollbackCopy);replaceDatabase(rollbackCopy,dataPath);core=new Core(dataPath,workspace,lease);available=true;throw Error('恢复失败，已还原恢复前数据：'+(error instanceof Error?error.message:'未知错误'))}
    finally{if(available||core!==previous){available=true;workspaces=new Workspaces(core.storage,core.workspace);core.listeners.add(broadcast);for(const ws of sockets)ws.close(1012,'Database restored')}}
-  }))}finally{if(!closed)previous.scheduler.start();if(available)maintenance=false}
+  }))}finally{if(!closed){previous.scheduler.start();previous.im=new IM(previous)}if(available)maintenance=false}
  })
  app.post('/api/runtime/shutdown',async c=>{
   z.object({instanceId:z.literal(instanceId)}).strict().parse(await c.req.json())

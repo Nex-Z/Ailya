@@ -19,7 +19,7 @@
 ## 当前验收边界
 
 浏览器前端已提供文件修改样例、问题计时和拒答/继续交互、权限选择、多 IM 独立配置及多行正则白名单。
-当前 Core 已接入真实模型流、SQLite 会话与附件、后台执行、停止、文本读写/精确编辑及真实差异、逐次授权和白名单，验证记录见 [阶段一](implementation/phase-1.md) 与 [阶段二](implementation/phase-2.md)。Shell、调度、MCP 见 [第三阶段](implementation/phase-3-tools.md)，Agent/Group 见 [Group 执行](implementation/group-execution.md)。问题批次、固定 30 秒超时、拒答、草稿恢复与同任务续跑已接入 Core，见 [提问与续跑](implementation/questions-resume.md)。运行时 Skills 的本地导入、Agent 选择、按需加载、手动调用与受权限控制的脚本导出已接入，见 [运行时 Skills 首版](implementation/runtime-skills.md)。Pi 工具插件的真实安装、更新、加载、卸载和会话调用已接入 Core，包字节、版本及任务引用由 SQLite 保存，见 [运行时插件首版](implementation/runtime-plugins.md)。设置中的数据库备份/恢复及 Core 单进程网页启动已接入，见 [备份恢复与启动](implementation/backup-runtime.md)。真实 IM、完整 Pi 扩展兼容、自动备份保留策略及完整文件生命周期仍待实现；保留的原型页面不代表这些能力完成。
+当前 Core 已接入真实模型流、SQLite 会话与附件、后台执行、停止、文本读写/精确编辑及真实差异、逐次授权和白名单，验证记录见 [阶段一](implementation/phase-1.md) 与 [阶段二](implementation/phase-2.md)。Shell、调度、MCP 见 [第三阶段](implementation/phase-3-tools.md)，Agent/Group 见 [Group 执行](implementation/group-execution.md)。问题批次、固定 30 秒超时、拒答、草稿恢复与同任务续跑已接入 Core，见 [提问与续跑](implementation/questions-resume.md)。运行时 Skills 的本地导入、Agent 选择、按需加载、手动调用与受权限控制的脚本导出已接入，见 [运行时 Skills 首版](implementation/runtime-skills.md)。Pi 工具插件的真实安装、更新、加载、卸载和会话调用已接入 Core，包字节、版本及任务引用由 SQLite 保存，见 [运行时插件首版](implementation/runtime-plugins.md)。设置中的数据库备份/恢复及 Core 单进程网页启动已接入，见 [备份恢复与启动](implementation/backup-runtime.md)。微信文字通道与可配置语音转写接口已接入，见 [微信与语音输入](implementation/im-voice.md)，真实微信账号收发及实际语音服务仍待验收。其他 IM、完整 Pi 扩展兼容、自动备份保留策略及完整文件生命周期仍待实现；保留的原型页面不代表这些能力完成。
 不能将配置保存、模拟回复或接口 mock 测试作为这些后端能力的验收结果。
 
 

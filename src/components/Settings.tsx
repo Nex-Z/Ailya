@@ -1,3 +1,4 @@
+import {SpeechSettings} from './SpeechSettings'
 import {MemorySettings} from './MemorySettings'
 import {StorageSettings} from './StorageSettings'
 import {SearchSettings} from './SearchSettings'
@@ -24,7 +25,7 @@ export function Settings(){
  const [usage,setUsage]=useState<{input:number;output:number;cache:number}|null>(null)
  useEffect(()=>{void api<{ok:boolean;version:number}>('/health').then(setHealth).catch(()=>setHealth(null));void api<{input:number;output:number;cache:number}>('/usage?days='+(period==='今天'?1:period==='最近 30 天'?30:7)).then(setUsage).catch(()=>setUsage(null))},[section,period])
  const patch=(v:Partial<typeof config>)=>{setDraft(d=>({...d,...v}));setSaved(false)}
- const editable=['常规','权限与安全','远程 IM'].includes(section)
+ const editable=['常规','权限与安全'].includes(section)
  const saveSection=async()=>{
   try{
    if(section==='权限与安全'){
@@ -36,8 +37,6 @@ export function Settings(){
     await api('/policy',{allowlist:draft.allowlist??''})
    }else if(section==='常规'){
     save({...config,language:draft.language,sendKey:draft.sendKey,allowlist:undefined})
-   }else if(section==='远程 IM'){
-    save({...config,imConfigs:draft.imConfigs,allowlist:undefined})
    }
    setValidation('');setSaved(true)
   }catch(error){setValidation(error instanceof Error?error.message:'保存失败')}
@@ -50,9 +49,9 @@ export function Settings(){
  {section==='权限与安全'&&<Row label="风险授权白名单"><Textarea disabled={!policyReady} placeholder="每行一条正则表达式" className="min-h-28 font-mono" aria-label="风险授权白名单" value={draft.allowlist??''} onChange={e=>patch({allowlist:e.target.value})}/></Row>}
  {section==='常规'&&<><Row label="语言"><Choice label="语言" value={draft.language} options={['简体中文','English']} onChange={language=>patch({language})}/></Row><Row label="发送快捷键"><Choice label="发送快捷键" value={draft.sendKey} options={['Enter','Ctrl + Enter']} onChange={sendKey=>patch({sendKey})}/></Row><Row label="界面主题">浅色</Row><Row label="默认机器">本地</Row></>}
  {section==='记忆'&&<MemorySettings/>}
- {section==='模型与连接'&&<><ModelSettings/><SearchSettings/></>}
+ {section==='模型与连接'&&<><ModelSettings/><SearchSettings/><SpeechSettings/></>}
  {section==='本地 Core'&&<><Row label="服务地址"><Input aria-label="Core 服务地址" value="http://127.0.0.1:4317" readOnly/></Row><Row label="连接状态">{health?.ok?'已连接':'未连接'}</Row><Row label="版本">{health?.version??'—'}</Row></>}
- {section==='远程 IM'&&<IMSettings items={draft.imConfigs??[{id:'legacy',platform:draft.imChannel,account:draft.imAccount,enabled:draft.imEnabled,scope:draft.imScope}]} onChange={imConfigs=>patch({imConfigs})}/>}
+ {section==='远程 IM'&&<IMSettings/>}
  {section==='会话与存储'&&<StorageSettings/>}
  {section==='Token 消耗'&&<><div className="mb-6 flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-muted-foreground">{usage?'模型返回用量':'暂无用量记录'}</span><div className="w-36"><Choice label="统计周期" value={period} options={['今天','最近 7 天','最近 30 天']} onChange={setPeriod}/></div></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[['输入 Token',usage?.input??0],['输出 Token',usage?.output??0],['缓存 Token',usage?.cache??0]].map(([label,total])=><div key={label} className="rounded-lg border p-4"><div className="mb-2 text-xs text-muted-foreground">{label}</div><div className="text-xl tabular-nums">{Number(total).toLocaleString()}</div></div>)}</div><div className="mt-6 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="py-3 font-medium">Agent</th><th className="py-3 text-right font-medium">Token 总量</th></tr></thead><tbody>{[['Ailya',(usage?.input??0)+(usage?.output??0)+(usage?.cache??0)]].map(([name,total])=><tr key={name} className="border-b"><td className="py-4">{name}</td><td className="text-right tabular-nums">{Number(total).toLocaleString()}</td></tr>)}</tbody></table></div></>}
  </div>{editable&&<div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-4 sm:px-8"><span role="status" className="text-xs text-muted-foreground">{validation||(section==='权限与安全'?policyError:'')||(saved?'已保存':'')}</span><Button size="sm" disabled={section==='权限与安全'&&!policyReady} onClick={saveSection}>保存</Button></div>}</div></div>

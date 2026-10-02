@@ -17,7 +17,7 @@ function validate(db:Database){
  if((db.query('PRAGMA integrity_check').get() as {integrity_check:string})?.integrity_check!=='ok')throw Error('备份完整性检查失败')
  const versions=db.query('SELECT version FROM schema_migrations ORDER BY version').all() as {version:number}[]
  const version=versions.at(-1)?.version??0
- if(version<1||version>11||versions.length!==version||versions.some((r,i)=>r.version!==i+1))throw Error('备份版本不受支持或迁移记录不完整')
+ if(version<1||version>12||versions.length!==version||versions.some((r,i)=>r.version!==i+1))throw Error('备份版本不受支持或迁移记录不完整')
  const expected=new Database(':memory:')
  try{expected.exec('CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY)');for(let n=1;n<=version;n++)expected.exec(readFileSync(new URL(`./migrations/${String(n).padStart(4,'0')}.sql`,import.meta.url),'utf8'));if(JSON.stringify(schema(db))!==JSON.stringify(schema(expected)))throw Error('文件不是兼容的 Ailya 备份：数据库结构不匹配')}finally{expected.close()}
  if(db.query('PRAGMA foreign_key_check').all().length)throw Error('备份包含失效的数据关系')
@@ -49,7 +49,7 @@ export class Backups{
    let counts:Record<string,number>
    try{validate(staged.db);this.sanitize(staged,this.current().memories.deletionLedger());counts=Object.fromEntries(tables.map(t=>[t,staged.get<{n:number}>(`SELECT count(*) n FROM ${t}`)!.n]))}finally{staged.close()}
    const id=crypto.randomUUID(),hash=digest(path),expires=Date.now()+10*60*1000;this.previews.set(id,{dir,path,hash,expires})
-   return {id,sourceVersion,version:11,counts,expiresAt:expires,size:statSync(path).size}
+   return {id,sourceVersion,version:12,counts,expiresAt:expires,size:statSync(path).size}
   }catch(error){this.cleanup(dir);throw error}
  }
  async restore(id:string,swap:(path:string,rollback:string)=>Promise<void>){
@@ -66,7 +66,13 @@ export class Backups{
  }
  close(){for(const p of this.previews.values())this.cleanup(p.dir);this.previews.clear()}
  discard(id:string){const preview=this.previews.get(id);if(preview){this.cleanup(preview.dir);this.previews.delete(id)}}
- private sanitize(staged:Storage,ledger:ReturnType<Memories['deletionLedger']>){const memories=new Memories(staged,this.current().workspace,sessionId=>{staged.db.run('DELETE FROM context_summaries WHERE session_id=?',[sessionId]);staged.db.run('DELETE FROM context_segments WHERE session_id=?',[sessionId])},false);try{memories.applyDeletionLedger(ledger)}finally{void memories.index.close()}}
+ private sanitize(staged:Storage,ledger:ReturnType<Memories['deletionLedger']>){
+  // Restoring an old backup must not replay external conversations or resend old messages.
+  staged.db.run("UPDATE im_accounts SET config=json_set(config,'$.enabled',json('false')),status='disabled'")
+  staged.db.run("UPDATE im_inbox SET state='cancelled' WHERE state IN ('pending','processing')")
+  staged.db.run("UPDATE im_outbox SET state='cancelled' WHERE state='pending'")
+  staged.db.run("UPDATE im_outbox SET state='uncertain' WHERE state='sending'")
+  const memories=new Memories(staged,this.current().workspace,sessionId=>{staged.db.run('DELETE FROM context_summaries WHERE session_id=?',[sessionId]);staged.db.run('DELETE FROM context_segments WHERE session_id=?',[sessionId])},false);try{memories.applyDeletionLedger(ledger)}finally{void memories.index.close()}}
 }
 
 // Replace only a closed database. The sibling rename is atomic; the caller retains the Core lock.
