@@ -3,6 +3,7 @@ import {CronDate,CronExpressionParser} from 'cron-parser'
 import {realpathSync,statSync} from 'node:fs'
 import {Storage} from './storage'
 import {encryptSecret,decryptSecret} from './secrets'
+import {RuntimeSkills,type SkillPackage} from './runtime-skills'
 
 export const resourceSchema=z.object({
  id:z.string().uuid(),kind:z.enum(['mcp','skill','task']),name:z.string().trim().min(1).max(80),enabled:z.boolean().default(false),
@@ -20,17 +21,19 @@ export function nextRun(r:Resource,now:number):number|null{
  return CronExpressionParser.parse(`${minute} ${hour} * * ${r.frequency==='weekly'?r.weekday:'*'}`,{currentDate:new Date(now),tz:r.timezone}).next().getTime()
 }
 export class Resources{
- constructor(public storage:Storage,private defaultWorkspace:string){}
+ skills:RuntimeSkills
+ constructor(public storage:Storage,private defaultWorkspace:string){this.skills=new RuntimeSkills(storage)}
  decode(row:Row):Resource{return JSON.parse(row.kind==='mcp'?decryptSecret(row.data):row.data)}
- list(){return this.storage.all<Row>('SELECT * FROM resources ORDER BY updated_at DESC').map(row=>({...this.decode(row),nextRun:row.next_run,lastRun:this.storage.get('SELECT id,due_at,status,session_id,error FROM schedule_runs WHERE resource_id=? ORDER BY due_at DESC LIMIT 1',row.id)??null}))}
+ list(){return this.storage.all<Row>('SELECT * FROM resources ORDER BY updated_at DESC').map(row=>({...this.decode(row),...(row.kind==='skill'?{skill:this.skills.metadata(row.id)}:{}),nextRun:row.next_run,lastRun:this.storage.get('SELECT id,due_at,status,session_id,error FROM schedule_runs WHERE resource_id=? ORDER BY due_at DESC LIMIT 1',row.id)??null}))}
  get(id:string){const row=this.storage.get<Row>('SELECT * FROM resources WHERE id=?',id);return row?this.decode(row):undefined}
- save(input:unknown,now=Date.now()){
+ save(input:unknown,now=Date.now(),imported?:SkillPackage){
   const r=resourceSchema.parse(input)
+  const old=this.get(r.id);if(old&&old.kind!==r.kind)throw Error('资源类型不能修改')
+  const skill=r.kind==='skill'&&(r.enabled||r.instructions.trim())?this.skills.prepare(r,imported):undefined
   if(r.kind==='mcp'){
    if(r.transport==='stdio'&&!r.command.trim())throw Error('请输入 MCP 启动命令')
    if(r.transport==='http'){const u=new URL(r.endpoint);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw Error('MCP 地址无效')}
   }
-  if(r.kind==='skill'&&r.enabled)throw Error('运行时 Skills 尚未接入，配置可停用保存')
   if(r.kind==='task'&&r.enabled){
    if(!r.instructions.trim())throw Error('请输入任务内容')
    if(r.agent!=='Ailya')throw Error('Agent/Group 执行尚未接入')
@@ -45,9 +48,10 @@ export class Resources{
    r.workspace=realpathSync(r.workspace==='Ailya'?this.defaultWorkspace:r.workspace);if(!statSync(r.workspace).isDirectory())throw Error('工作空间必须是目录')
   }
   const data=JSON.stringify(r),due=nextRun(r,now)
-  try{this.storage.db.run('INSERT INTO resources VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,name=excluded.name,data=excluded.data,enabled=excluded.enabled,next_run=excluded.next_run,updated_at=excluded.updated_at',[r.id,r.kind,r.name,r.kind==='mcp'?encryptSecret(data):data,Number(r.enabled),due,now])}catch(e){if(String(e).includes('UNIQUE'))throw Error('名称已存在');throw e}
+  try{this.storage.db.transaction(()=>{this.storage.db.run('INSERT INTO resources VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,name=excluded.name,data=excluded.data,enabled=excluded.enabled,next_run=excluded.next_run,updated_at=excluded.updated_at',[r.id,r.kind,r.name,r.kind==='mcp'?encryptSecret(data):data,Number(r.enabled),due,now]);if(skill)this.skills.persist(r.id,skill)})()}catch(e){if(String(e).includes('UNIQUE'))throw Error('名称或 Skill 标识已存在');throw e}
   return r
  }
+ importSkill(path:string,enabled=false){const pack=this.skills.readDirectory(path);return this.save({id:crypto.randomUUID(),kind:'skill',name:pack.meta.name,instructions:pack.document,enabled},Date.now(),pack)}
  remove(id:string){this.storage.db.run('DELETE FROM resources WHERE id=?',[id])}
  importPrototype(input:unknown){
   const rows=z.array(z.unknown()).max(500).parse(input)

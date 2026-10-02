@@ -14,7 +14,7 @@ test('v4 catalog and history survive v5 with a readable pre-upgrade backup',()=>
  try{
   expect(current.get<{data:string}>('SELECT data FROM catalog')!.data).toBe('{"id":"kept"}')
   expect(current.session<{text:string}>('history')!.text).toBe('retained')
-  expect(current.get<{v:number}>('SELECT max(version) v FROM schema_migrations')!.v).toBe(9)
+  expect(current.get<{v:number}>('SELECT max(version) v FROM schema_migrations')!.v).toBe(10)
   const backup=new Database(join(root,readdirSync(root).find(n=>n.startsWith('db.before-v5-'))!),{readonly:true})
   try{expect(backup.query('SELECT max(version) v FROM schema_migrations').get()).toEqual({v:4});expect(backup.query('SELECT count(*) n FROM catalog').get()).toEqual({n:1})}finally{backup.close()}
  }finally{current.close();rmSync(root,{recursive:true,force:true})}

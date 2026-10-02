@@ -167,7 +167,6 @@ export class Core {
   const persona:AgentConfig|undefined=resume?saved.agentConfig:child?.persona??(group?catalog.agents.find(a=>a.id===group.coordinator):ctx.agent==='Ailya'?undefined:session?.agentId?catalog.agents.find(a=>a.id===session?.agentId):namedAgent??catalog.agents.find(a=>a.id===ctx.agent))
   if(ctx.agent!=='Ailya'&&!persona)throw Error('Agent 或 Group 协调者不存在')
   const members:AgentConfig[]=resume?saved.memberConfigs??[]:group?group.members.map((id:string)=>{const member=catalog.agents.find(a=>a.id===id);if(!member)throw Error('Group 成员不存在');return member}):[]
-  if(persona?.skills.length)throw Error('该 Agent 配置的运行时 Skills 尚未接入，请先移除 Skills')
   if(persona?.tools.some(t=>!['文件','Shell','联网搜索','定时任务','MCP'].includes(t)))throw Error('Agent 配置包含尚未支持的工具')
   if(persona&&persona.model!=='默认模型'&&!session)ctx.model=persona.model
   let providerId:string,modelId:string
@@ -189,6 +188,9 @@ export class Core {
   const {model,options:runtimeOptions,source:profileSource}=profile
   if(resume&&model.baseUrl!==provider.baseUrl)throw Error('厂商地址已变化，不能安全续跑原任务')
   const taskId=resume?.id??crypto.randomUUID(),startedAt=resume?.started_at??Date.now()
+  const skillSet=resume?this.resources.skills.snapshots(taskId):this.resources.skills.available(persona?.skills)
+  const selectedSkill=data.text.match(/^\/skill:([a-z0-9-]+)(?:\s|$)/)?.[1]
+  if(selectedSkill&&!skillSet.some(m=>m.name===selectedSkill||m.resource_id===selectedSkill))throw Error('该 Skill 未启用或未分配给当前 Agent')
   let reply:ChatMessage
   let userMessageId:string
   let history:AgentMessage[]=JSON.parse(this.storage.get<{data:string}>('SELECT data FROM transcripts WHERE session_id=?',sessionId)?.data??'[]')
@@ -207,8 +209,8 @@ export class Core {
    history=JSON.parse(previous.data).history
    Object.assign(reply,{text:'',reasoning:undefined,error:undefined,stopped:false,fileChanges:[],parts:[],durationMs:0,executing:true})
   }else{userMessageId=crypto.randomUUID();session.messages.push({id:userMessageId,role:'user',text:data.text,files:files.map(f=>f.name),attachmentIds:files.map(f=>f.id)});reply={id:crypto.randomUUID(),role:'assistant',text:'',parts:[],executing:true};session.messages.push(reply)}
-  this.storage.db.transaction(()=>{this.storage.saveSession(session!);if(resume){this.storage.db.run("UPDATE tasks SET status='running',finished_at=NULL WHERE id=?",[taskId]);return}for(const file of files)this.storage.db.run('INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)',[file.id,sessionId,userMessageId,file.name,file.mime,file.size,file.hash,file.bytes,Date.now()]);this.storage.db.run('INSERT INTO tasks(id,session_id,request_id,status,started_at,data) VALUES(?,?,?,?,?,?)',[taskId,sessionId,data.requestId,'running',startedAt,JSON.stringify({messageId:reply.id,input:auditedInput,history,agentConfig:persona,groupConfig:group,memberConfigs:members,executionContext:{...session!.context}})]);if(child)this.storage.db.run('INSERT INTO group_runs VALUES(?,?,?,?,?,?)',[sessionId,taskId,child.parentSessionId,child.parentTaskId,child.toolCallId,child.persona.id])})()
-  const systemPrompt=resume&&saved.systemPrompt?saved.systemPrompt:SYSTEM_PROMPT+'\n\n'+MEMORY_PROMPT+(persona?'\n\nAgent: '+persona.name+'\n'+persona.prompt:'')
+  this.storage.db.transaction(()=>{this.storage.saveSession(session!);if(resume){this.storage.db.run("UPDATE tasks SET status='running',finished_at=NULL WHERE id=?",[taskId]);return}for(const file of files)this.storage.db.run('INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)',[file.id,sessionId,userMessageId,file.name,file.mime,file.size,file.hash,file.bytes,Date.now()]);this.storage.db.run('INSERT INTO tasks(id,session_id,request_id,status,started_at,data) VALUES(?,?,?,?,?,?)',[taskId,sessionId,data.requestId,'running',startedAt,JSON.stringify({messageId:reply.id,input:auditedInput,history,agentConfig:persona,groupConfig:group,memberConfigs:members,executionContext:{...session!.context}})]);this.resources.skills.snapshot(taskId,skillSet);if(child)this.storage.db.run('INSERT INTO group_runs VALUES(?,?,?,?,?,?)',[sessionId,taskId,child.parentSessionId,child.parentTaskId,child.toolCallId,child.persona.id])})()
+  const systemPrompt=resume&&saved.systemPrompt?saved.systemPrompt:SYSTEM_PROMPT+'\n\n'+MEMORY_PROMPT+this.resources.skills.prompt(skillSet)+(persona?'\n\nAgent: '+persona.name+'\n'+persona.prompt:'')
   if(!resume){const audit=JSON.parse(this.storage.get<Task>('SELECT * FROM tasks WHERE id=?',taskId)!.data);audit.runtimeProfile=profile;audit.systemPrompt=systemPrompt;this.storage.db.run('UPDATE tasks SET data=? WHERE id=?',[JSON.stringify(audit),taskId])}
   reply.phase='waiting'
   let ordinal=this.storage.get<{n:number}>('SELECT coalesce(max(ordinal),0) n FROM requests WHERE task_id=?',taskId)!.n
@@ -243,6 +245,7 @@ export class Core {
    agent.state.tools=agent.state.tools.filter(t=>t.name==='read_attachment'||allowed.has(t.name.startsWith('mcp_')?'MCP':t.name==='powershell'?'Shell':t.name==='web_search'?'联网搜索':t.name==='schedule_task'?'定时任务':['read','write','edit','ls','find','search_files','export_attachment'].includes(t.name)?'文件':''))
   }
   agent.state.tools=[...agent.state.tools,this.compaction.tool(sessionId)]
+  agent.state.tools=[...agent.state.tools,...this.resources.skills.tools(taskId,skillSet,workspace,authorize,!persona||persona.tools.includes('文件'),ctx.permission,changed)]
   const memorySource=session.messages.findLast(m=>m.role==='user')
   agent.state.tools=[...agent.state.tools,...this.memories.tools(workspace,child?.parentSessionId??sessionId,{sessionId,messageId:memorySource?.id??'',text:memorySource?.text??''},!!child||!!this.storage.get('SELECT id FROM schedule_runs WHERE id=?',data.requestId))]
   agent.state.tools=[...agent.state.tools,this.questions.tool(sessionId,taskId,child?.parentSessionId??sessionId,persona?.name??'Ailya',startedAt,()=>this.saveTranscript(sessionId,agent.state.messages))]
@@ -306,7 +309,7 @@ export class Core {
    }else flush()
   })
   const done=Promise.resolve().then(async()=>{
-   try{if(this.storage.get<{status:string}>('SELECT status FROM tasks WHERE id=?',taskId)?.status==='stopping')reply.stopped=true;else if(resume)await agent.continue();else await agent.prompt((data.text||'请查看附件。')+attachmentPrompt(this.storage,sessionId,userMessageId))}catch(error){if(!reply.stopped)reply.error=error instanceof Error?error.message:'执行失败'}
+   try{if(this.storage.get<{status:string}>('SELECT status FROM tasks WHERE id=?',taskId)?.status==='stopping')reply.stopped=true;else if(resume)await agent.continue();else await agent.prompt(this.resources.skills.expand(taskId,data.text||'请查看附件。',skillSet)+attachmentPrompt(this.storage,sessionId,userMessageId))}catch(error){if(!reply.stopped)reply.error=error instanceof Error?error.message:'执行失败'}
    finally{
     await mcp.close()
     if(streamTimer)clearTimeout(streamTimer)

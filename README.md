@@ -27,7 +27,9 @@ npx playwright test
 
 附件支持 UTF-8 直接读取，也可通过 `export_attachment` 授权导出到工作空间，供 Shell、已有解析库或模型编写的脚本处理 PDF 等格式。详见 [附件与脚本回退](docs/implementation/attachment-fallback.md)；具体格式能否解析取决于实际工具及文件内容。
 
-首个真实 Core 会话阶段已接入，详见文末。调度和 MCP 已接入；IM、语音及运行时 Skills/Pi 插件仍未实装。浏览器中的模拟状态不得作为正式功能验收依据。
+首个真实 Core 会话阶段已接入，详见文末。调度、MCP 和运行时 Skills 已接入；IM、语音及 Pi 插件仍未实装。浏览器中的模拟状态不得作为正式功能验收依据。
+
+运行时 Skills 可在「扩展 → Skills」新增或导入本地 `SKILL.md` 包，启用后分配给 Agent，或在输入框 `/skill` 命令列表中选择。Core 保存技能正文和随附文件，按任务固定版本；模型按需读取，脚本通过原有文件/Shell 权限执行。详见 [运行时 Skills 首版](docs/implementation/runtime-skills.md)。仓库 `.agents/skills` 不会自动安装到产品。
 
 ## 参考版
 

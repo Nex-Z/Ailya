@@ -10,6 +10,7 @@ export class Catalog{
  list(){const rows=this.storage.all<{kind:string;data:string}>('SELECT kind,data FROM catalog');return {agents:rows.filter(r=>r.kind==='agents').map(r=>JSON.parse(r.data) as AgentConfig),groups:rows.filter(r=>r.kind==='groups').map(r=>JSON.parse(r.data) as GroupConfig)}}
  save(kind:'agents'|'groups',input:unknown){
   const value=kind==='agents'?agentSchema.parse(input):groupSchema.parse(input),all=this.list()
+  if('skills' in value)value.skills=[...new Set(value.skills.map(key=>this.storage.get<{id:string}>("SELECT id FROM resources WHERE kind='skill' AND (id=? OR name=?)",key,key)?.id??key))]
   if(value.name.toLowerCase()==='ailya'&&(kind!=='agents'||value.id!=='Ailya'))throw Error('Ailya 是内置角色名称')
   if([...all.agents,...all.groups].some(x=>x.id!==value.id&&x.name.toLowerCase()===value.name.toLowerCase()))throw Error('名称已存在')
   if('members' in value&&[value.coordinator,...value.members].some(id=>!all.agents.some(a=>a.id===id)))throw Error('请选择有效 Agent')

@@ -1,4 +1,5 @@
 import {ContextUsage} from './ContextUsage'
+import {useResources} from '../resources'
 import {ThinkingSelect} from './ThinkingSelect'
 import {api} from '../lib/core-api'
 import { useAttachments, type LocalAttachment } from '../attachments'
@@ -38,6 +39,9 @@ export function Composer({ blocked, commandOpen, setCommandOpen, draft, setDraft
  const session = useStore(s => s.sessions.find(x => x.id === s.activeId)!)
  const setContext = useStore(s => s.setContext)
  const catalog = useCatalog()
+ const loadResources=useResources(s=>s.load)
+ useResources(s=>s.items)
+ useEffect(()=>{void loadResources()},[loadResources])
  const items:CommandItem[] = mention ? [
   ...catalog.agents.map(x=>({id:'agent-'+x.id,label:x.name,description:'Agent',icon:Bot,key:'agent' as const,value:x.name,section:'Agent'})),
   ...catalog.groups.map(x=>({id:'group-'+x.id,label:x.name,description:'Group',icon:Users,key:'agent' as const,value:x.name,section:'Group'})),
@@ -84,7 +88,7 @@ export function Composer({ blocked, commandOpen, setCommandOpen, draft, setDraft
    {files.length > 0 && <div className="composer-attachments mb-2 flex max-h-32 flex-wrap gap-2 overflow-y-auto">{files.map((f) => <span className="inline-flex max-w-full items-center gap-2 break-all rounded-md border bg-muted px-2 py-1 text-xs" key={f.id}><Paperclip size={12}/>{f.file.name}<button aria-label={`移除 ${f.file.name}`} onClick={() => attachmentStore.remove(sessionId, f.id)}><X size={12}/></button></span>)}</div>}
   <div className={`composer rounded-xl border bg-popover p-3 shadow-sm focus-within:ring-1 focus-within:ring-ring ${dragging ? 'ring-2 ring-ring bg-muted' : ''}`}>
    {(explicitAgent||session.context.agent!=='Ailya')&&<span className="mb-1 inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs"><Bot className="size-3"/>@{session.context.agent}{!session.messages.length&&<button type="button" aria-label="取消对话对象" onClick={()=>{setContext('agent','Ailya');setExplicitAgent(false)}}><X className="size-3"/></button>}</span>}
-   <Textarea className="min-h-20 resize-none border-0 bg-transparent px-1 py-2 text-sm shadow-none focus-visible:ring-0" ref={textarea} aria-label="消息" aria-expanded={commandOpen} aria-controls={commandOpen ? 'slash-options' : undefined} aria-activedescendant={commandOpen && items.length ? `slash-option-${selected}` : undefined} placeholder="有什么想一起做的？" rows={2} value={draft} onChange={e => { const value = e.target.value; setDraft(value); const caret=e.target.selectionStart;const match=value.slice(0,caret).match(/(?:^|\s)@([^@\n]*)$/);const mentionMatch=match?{start:caret-match[1].length-1,end:caret,query:match[1]}:null;setMention(mentionMatch);const isCommand = value.startsWith('/') && !value.includes('\n'); setCommandOpen(!!mentionMatch||isCommand); if (mentionMatch||isCommand) { setMenuQuery(value); setActive(0) } }} onKeyDown={e => {
+   <Textarea className="min-h-20 resize-none border-0 bg-transparent px-1 py-2 text-sm shadow-none focus-visible:ring-0" ref={textarea} aria-label="消息" aria-expanded={commandOpen} aria-controls={commandOpen ? 'slash-options' : undefined} aria-activedescendant={commandOpen && items.length ? `slash-option-${selected}` : undefined} placeholder="有什么想一起做的？" rows={2} value={draft} onChange={e => { const value = e.target.value; setDraft(value); const caret=e.target.selectionStart;const match=value.slice(0,caret).match(/(?:^|\s)@([^@\n]*)$/);const mentionMatch=match?{start:caret-match[1].length-1,end:caret,query:match[1]}:null;setMention(mentionMatch);const isCommand = value.startsWith('/') && !value.includes('\n') && !/^\/skill:[a-z0-9-]+\s/.test(value); setCommandOpen(!!mentionMatch||isCommand); if (mentionMatch||isCommand) { setMenuQuery(value); setActive(0) } }} onKeyDown={e => {
     if (e.nativeEvent.isComposing) return
     if (commandOpen) {
      if (e.key === 'Escape') { e.preventDefault(); setCommandOpen(false); return }

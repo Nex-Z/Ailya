@@ -1,13 +1,13 @@
 import { create } from 'zustand'
 import { api } from './lib/core-api'
 export type ResourceKind = 'mcp' | 'skill' | 'task'
-export type Resource = { id:string; kind:ResourceKind; name:string; enabled:boolean; transport:'stdio'|'http'; command:string; endpoint:string; instructions:string; frequency:'daily'|'weekly'|'once'; time:string; weekday:string; date:string; timezone:string; agent:string; workspace:string; sourceSession?:string; model?:string;permission?:'default'|'full';env?:Record<string,string>;headers?:Record<string,string>;nextRun?:number|null;lastRun?:{status:string;session_id:string|null;error:string|null;due_at:number}|null }
+export type Resource = { skill?:{name:string;description:string;version:number;manual:number};id:string; kind:ResourceKind; name:string; enabled:boolean; transport:'stdio'|'http'; command:string; endpoint:string; instructions:string; frequency:'daily'|'weekly'|'once'; time:string; weekday:string; date:string; timezone:string; agent:string; workspace:string; sourceSession?:string; model?:string;permission?:'default'|'full';env?:Record<string,string>;headers?:Record<string,string>;nextRun?:number|null;lastRun?:{status:string;session_id:string|null;error:string|null;due_at:number}|null }
 export const createResource = (kind:ResourceKind):Resource => ({id:crypto.randomUUID(),kind,name:'',enabled:false,transport:'stdio',command:'',endpoint:'',instructions:'',frequency:'daily',time:'',weekday:'1',date:'',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,agent:'Ailya',workspace:'Ailya'})
 let imported=false
 export const useResources=create<{items:Resource[];error:string;load:()=>Promise<void>;save:(entry:Resource)=>Promise<string|null>;remove:(id:string)=>Promise<void>;toggle:(id:string)=>Promise<void>}>((set,get)=>({
  items:[],error:'',
  load:async()=>{try{if(!imported){const raw=localStorage.getItem('ailya-resources-v1');const legacy=raw?JSON.parse(raw)?.state?.items??[]:[];await api('/resources/import-prototype',legacy);imported=true}set({items:await api<Resource[]>('/resources'),error:''})}catch(e){try{set({items:await api<Resource[]>('/resources')})}catch{}set({error:e instanceof Error?e.message:'配置加载失败'})}},
- save:async entry=>{try{const {nextRun:_,lastRun:__,...data}=entry;await api('/resources',data);await get().load();return null}catch(e){return e instanceof Error?e.message:'配置保存失败'}},
+ save:async entry=>{try{const {nextRun:_,lastRun:__,skill:___,...data}=entry;await api('/resources',data);await get().load();return null}catch(e){return e instanceof Error?e.message:'配置保存失败'}},
  remove:async id=>{try{await api('/resources/'+id,{},'DELETE');await get().load()}catch(e){set({error:e instanceof Error?e.message:'删除失败'})}},
  toggle:async id=>{const entry=get().items.find(x=>x.id===id);if(entry){const error=await get().save({...entry,enabled:!entry.enabled});set({error:error??''})}},
 }))
